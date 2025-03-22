@@ -1,4 +1,4 @@
-name: Build and Release Kernel
+name: Build and Release Kernel  (LTO Optimized)
 
 on:
   push:
@@ -12,11 +12,13 @@ env:
   BRANCH: "android14-6.1"
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   CCACHE_DIR: ${{ github.workspace }}/.ccache
+  LTO_CACHE_DIR: ${{ github.workspace }}/.lto_cache
+  LLVM_VERSION: "15"
 
 jobs:
   build-release:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
 
     steps:
       - name: Checkout Code
@@ -29,20 +31,27 @@ jobs:
         run: |
           sudo apt-get clean
           sudo rm -rf /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          mkdir -p "${{ env.CCACHE_DIR }}" "${{ env.LTO_CACHE_DIR }}"
 
       - name: Setup Build Environment
         run: |
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends \
-            bc bison build-essential ccache cmake curl flex \
-            git libdw-dev libelf-dev libssl-dev lld llvm \
-            ninja-build python3-dev python3-pip rsync unzip \
-            wget zip zlib1g-dev
+            bc bison build-essential ccache clang-$LLVM_VERSION cmake \
+            curl flex git libdw-dev libelf-dev libssl-dev lld-$LLVM_VERSION \
+            llvm-$LLVM_VERSION ninja-build python3-dev python3-pip rsync \
+            unzip wget zip zlib1g-dev
+
+          sudo update-alternatives --install /usr/bin/ld ld /usr/bin/ld.lld-$LLVM_VERSION 100
+          sudo update-alternatives --install /usr/bin/ar ar /usr/bin/llvm-ar-$LLVM_VERSION 100
+          sudo update-alternatives --install /usr/bin/nm nm /usr/bin/llvm-nm-$LLVM_VERSION 100
+          sudo update-alternatives --install /usr/bin/ranlib ranlib /usr/bin/llvm-ranlib-$LLVM_V
 
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          max-size: 2G
+          key: lto-build-${{ hashFiles('**/gki_defconfig') }}
+          max-size: 4G
           
       - name: Setup Python Environment
         run: |
@@ -127,6 +136,13 @@ jobs:
         run: |
           set -e
           CONFIGS=(
+            "CONFIG_LTO=y"
+            "CONFIG_LTO_CLANG=y"
+            "CONFIG_LTO_CLANG_FULL=y"
+            "CONFIG_THINLTO=n"
+            "CONFIG_ARCH_SUPPORTS_LTO=y"
+            "CONFIG_ARCH_SUPPORTS_LTO_CLANG=y"
+            "CONFIG_DEBUG_INFO_BTF=y"
             "CONFIG_KSU=y"
             "CONFIG_KSU_WITH_KPROBES=n"
             "CONFIG_KSU_SUSFS=y"
@@ -170,10 +186,6 @@ jobs:
       - name: Clean Kernel Version Strings
         working-directory: ${{ steps.build-dir.outputs.path }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
-          echo "Running sed commands..."
-          sed -i 's/CONFIG_LTO=n/CONFIG_LTO=y/' "./common/arch/arm64/configs/gki_defconfig"
-          sed -i 's/CONFIG_LTO_CLANG_THIN=y/CONFIG_LTO_CLANG_FULL=y/' "./common/arch/arm64/configs/gki_defconfig"
-          sed -i 's/CONFIG_LTO_CLANG_NONE=y/CONFIG_LTO_CLANG_FULL=y/' "./common/arch/arm64/configs/gki_defconfig"
           #Run sed commands for modifications
           sed -i 's/check_defconfig//' ./common/build.config.gki
           sed -i '$s|echo "\$res"|echo "\$res"|' ./common/scripts/setlocalversion
@@ -185,11 +197,17 @@ jobs:
           sed -i 's/-dirty//' ./external/dtc/scripts/setlocalversion
           sed -i 's/-dirty//' ./build/kernel/kleaf/workspace_status_stamp.py || echo "No workspace_status_stamp.py!"
 
-      - name: Build Kernel
+      - name: Build Kernel with LTO
         working-directory: ${{ steps.build-dir.outputs.path }}/kernel_platform/oneplus13r_v
+        env:
+          KCFLAGS: "-flto -fvisibility=default -fsplit-lto-unit"
+          KLDFLAGS: "-flto=full -Wl,--no-undefined-version"
         run: |
           export KBUILD_BUILD_USER="GitHubActions"
           export KBUILD_BUILD_HOST="gh-runner"
+          export AR=llvm-ar
+          export NM=llvm-nm
+          export RANLIB=llvm-ranlib
           
           cd kernel_platform
           ./build_with_bazel.py \
@@ -198,7 +216,15 @@ jobs:
             --jobs=$(nproc) \
             --verbose_failures \
             --config=stamp \
-            --user_kmi_symbol_lists=//msm-kernel:android/abi_gki_aarch64_qcom
+            --user_kmi_symbol_lists=//msm-kernel:android/abi_gki_aarch64_qcom \
+            --action_env=THINLTO_CACHE_DIR="${{ env.LTO_CACHE_DIR }}" \
+            --action_env=THINLTO_CACHE_MAX_SIZE="10G"
+
+      - name: Verify LTO Build
+        working-directory: ${{ steps.build-dir.outputs.path }}/kernel_platform/oneplus13r_v/kernel_platform
+        run: |
+          readelf -S out/dist/vmlinux | grep -i '\.lto' || { echo "LTO sections missing!"; exit 1; }
+          pahole -JV out/dist/vmlinux || { echo "BTF validation failed!"; exit 1; }
 
       - name: Download SUSFS Module
         working-directory: ${{ steps.build-dir.outputs.path }}/AnyKernel3
@@ -215,7 +241,7 @@ jobs:
           cp kernel_platform/oneplus13r_v/kernel_platform/out/dist/Image AnyKernel3/
           
           cd AnyKernel3
-          zip_name="WildPlusKernel-OP13r-$(date +'%Y%m%d').zip"
+          zip_name="WildPlusKernel-OP13r-LTO-$(date +'%Y%m%d').zip"
           zip -r9 "../${zip_name}" .
           echo "ZIP_PATH=${zip_name}" >> $GITHUB_ENV
 
