@@ -216,20 +216,40 @@ jobs:
             --user_kmi_symbol_lists=//msm-kernel:android/abi_gki_aarch64_qcom \
             --ignore_missing_projects \
             -o "$(pwd)/out" || { echo "Bazel build failed"; exit 1; }
-      # Step 14: Create a ZIP package
+      #  Step 14: Create a ZIP package with SUSFS module
       - name: Create ZIP Package
         working-directory: builds/${{ env.ROOT_DIR }}
         run: |
           if [ ! -f kernel_platform/oneplus13r_v/kernel_platform/out/dist/Image ]; then
-            echo "Kernel image not found"; exit 1
+            echo "❌ Kernel image not found"
+            exit 1
           fi
-          cp kernel_platform/oneplus13r_v/kernel_platform/out/dist/Image AnyKernel3/Image || { echo "Failed to copy kernel image"; exit 1; }
+          
+          # Copy kernel image
+          cp kernel_platform/oneplus13r_v/kernel_platform/out/dist/Image AnyKernel3/Image || {
+            echo "❌ Failed to copy kernel image"
+            exit 1
+          }
+
+          # Download SUSFS module
+          wget -q -O AnyKernel3/ksu_module_susfs.zip \
+            https://github.com/sidex15/ksu_module_susfs/releases/latest/download/ksu_module_susfs_1.5.2+.zip || {
+            echo "❌ Failed to download SUSFS module"
+            exit 1
+          }
+
+          # Create final package
           cd AnyKernel3
-          ZIP_NAME="Anykernel3-OP13r.zip"
-          echo "Creating zip file $ZIP_NAME..."
-          zip -r "../$ZIP_NAME" ./* || { echo "Failed to create zip file"; exit 1; }
+          ZIP_NAME="OP13r-KSU-${KSUVER}.zip"
+          echo "📦 Creating zip file: $ZIP_NAME"
+          zip -r "../$ZIP_NAME" ./* || {
+            echo "❌ Failed to create zip file"
+            exit 1
+          }
+          
           ls -lh "../$ZIP_NAME"
           echo "zip_name=$ZIP_NAME" >> $GITHUB_ENV
+
       # Step 15: Upload build artifacts
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
