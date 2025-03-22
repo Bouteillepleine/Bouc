@@ -40,23 +40,10 @@ jobs:
             wget zip zlib1g-dev
 
       - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@v1.3
+        uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: ${{ runner.os }}-kernel-${{ env.BRANCH }}
-          max-size: 4G
-
-      - name: Install Latest Pahole
-        run: |
-          sudo apt-get remove --purge -y dwarves || true
-          git clone --depth=1 --recurse-submodules https://git.kernel.org/pub/scm/devel/pahole/pahole.git
-          cd pahole
-          mkdir build
-          cd build
-          cmake -D__LIB=lib ..
-          make -j$(nproc)
-          sudo make install
-          cd ../..
-
+          max-size: 2G
+          
       - name: Setup Python Environment
         run: |
           python3 -m pip install --upgrade pip wheel
