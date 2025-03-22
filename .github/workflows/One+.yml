@@ -72,17 +72,26 @@ jobs:
           git clone https://github.com/WildPlusKernel/kernel_patches.git
 
       - name: Sync Kernel Sources
-        working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v
+        working-directory: builds/${{ env.ROOT_DIR }}
         run: |
           set -ex
+          # Create the required directory structure
+          mkdir -p kernel_platform/oneplus13r_v
+          cd kernel_platform/oneplus13r_v
+
+          # Initialize repo
           repo init -u https://github.com/OnePlusOSS/kernel_manifest.git \
             -b oneplus/sm8650 \
             -m oneplus_13r.xml \
             --depth=1 || exit 1
+
+          # Sync repositories
           repo sync -c -j$(nproc --all) \
             --force-sync \
             --no-clone-bundle \
             --no-tags || exit 1
+
+          # Clean protected exports
           rm -rf ./kernel_platform/common/android/abi_gki_protected_exports_*
 
       - name: Integrate KernelSU
