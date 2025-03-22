@@ -1,181 +1,126 @@
-# This is a name: Build and Release Kernel
+name: Build and Release Kernel
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
-    inputs:
-      soc_platform:
-        description: 'SoC Platform Branch (e.g., oneplus/sm8650)'
-        required: true
-        default: oneplus/sm8650
-      device_manifest:
-        description: 'Device Manifest XML (e.g., oneplus_13r.xml)'
-        required: true
-        default: oneplus_13r.xml
-      build_target:
-        description: 'Bazel build target (e.g., pineapple)'
-        required: true
-        default: pineapple
-      android_version:
-        description: 'Android Version (e.g., A15)'
-        required: true
-        default: A15
-      kernel_branch:
-        description: 'Kernel Source Branch (e.g., android14-6.1)'
-        required: true
-        default: android14-6.1
 
 env:
   DEBIAN_FRONTEND: noninteractive
-  ROOT_DIR_PREFIX: "OP-${{ inputs.android_version }}"
-  BRANCH: "${{ inputs.kernel_branch }}"
+  ROOT_DIR_PREFIX: "OP13r-A15"
+  BRANCH: "android14-6.1"
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
 
 jobs:
   build-release:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          submodules: recursive
 
       - name: Free Disk Space
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -qq curl
-          curl -fsSL https://raw.githubusercontent.com/kou/arrow/e49d8ae15583ceff03237571569099a6ad62be32/ci/scripts/util_free_space.sh | bash
+          sudo apt-get clean
+          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/local/share/boost
 
       - name: Setup Build Environment
         run: |
-          sudo apt-get update
+          sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends \
-            python3-pip \
-            curl \
-            git \
-            zip \
-            unzip \
-            gcc \
-            g++ \
-            make \
-            ninja-build \
-            file \
-            bc \
-            bison \
-            flex \
-            libssl-dev \
-            libelf-dev \
-            wget \
-            build-essential \
-            python3-dev \
-            python3-setuptools \
-            rsync \
-            ccache \
-            cmake \
-            libdw-dev \
-            zlib1g-dev
+            bc bison build-essential ccache cmake curl flex \
+            git libdw-dev libelf-dev libssl-dev lld llvm \
+            ninja-build python3-dev python3-pip rsync unzip \
+            wget zip zlib1g-dev
 
       - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@v1.3
         with:
-          max-size: 2G
+          key: ${{ runner.os }}-kernel-${{ env.BRANCH }}
+          max-size: 4G
 
       - name: Install Latest Pahole
         run: |
           sudo apt-get remove --purge -y dwarves || true
-          git clone --recurse-submodules https://git.kernel.org/pub/scm/devel/pahole/pahole.git
+          git clone --depth=1 --recurse-submodules https://git.kernel.org/pub/scm/devel/pahole/pahole.git
           cd pahole
           mkdir build
           cd build
-          cmake ..
-          make
+          cmake -D__LIB=lib ..
+          make -j$(nproc)
           sudo make install
           cd ../..
 
-      - name: Setup Python and Repo Tool
+      - name: Setup Python Environment
         run: |
-          python3 -m pip install --upgrade pip
-          pip3 install gitpython xmltodict
+          python3 -m pip install --upgrade pip wheel
+          pip3 install --user gitpython xmltodict
+
+      - name: Configure Repo Tool
+        run: |
           mkdir -p ~/.bin
-          curl -s https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
-          chmod a+x ~/.bin/repo
+          curl -sL https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+          chmod a+rx ~/.bin/repo
           echo "$HOME/.bin" >> $GITHUB_PATH
-          git config --global user.name "GitHub Actions Bot"
-          git config --global user.email "actions@github.com"
 
-      - name: Derive Model Directory
+      - name: Initialize Build Directory
+        id: build-dir
         run: |
-          MODEL_DIR=$(echo "${{ inputs.device_manifest }}" | sed 's/.xml$//; s/_/-/g')
-          echo "MODEL_DIR=${MODEL_DIR}" >> $GITHUB_ENV
+          build_dir="${ROOT_DIR_PREFIX}-$(date +'%Y%m%d')-${GITHUB_SHA:0:7}"
+          echo "ROOT_DIR=${build_dir}" >> $GITHUB_ENV
+          mkdir -p "builds/${build_dir}"
+          echo "::set-output name=path::builds/${build_dir}"
 
-      - name: Configure Build Directory
+      - name: Clone Dependencies
+        working-directory: ${{ steps.build-dir.outputs.path }}
         run: |
-          ROOT_DIR="${ROOT_DIR_PREFIX}-$(date +'%Y-%m-%d-%I-%M-%p')-release"
-          echo "ROOT_DIR=${ROOT_DIR}" >> $GITHUB_ENV
-          mkdir -p "builds/${ROOT_DIR}"
-          cd "builds/${ROOT_DIR}"
+          git clone --depth=1 https://github.com/Kernel-SU/AnyKernel3
+          git clone -b gki-android14-6.1 --single-branch https://gitlab.com/simonpunk/susfs4ksu.git
+          git clone --filter=blob:none https://github.com/WildPlusKernel/kernel_patches.git
 
-      - name: Clone Required Repositories
-        working-directory: builds/${{ env.ROOT_DIR }}
+      - name: Initialize Kernel Source
+        working-directory: ${{ steps.build-dir.outputs.path }}
         run: |
-          repos=(
-            "https://github.com/Kernel-SU/AnyKernel3 --depth=1"
-            "https://gitlab.com/simonpunk/susfs4ksu.git -b gki-${{ env.BRANCH }}"
-            "https://github.com/WildPlusKernel/kernel_patches.git"
+          mkdir -p kernel_platform/oneplus13r_v
+          cd kernel_platform/oneplus13r_v
+          repo init -u https://github.com/OnePlusOSS/kernel_manifest.git \
+            -b oneplus/sm8650 \
+            -m oneplus_13r.xml \
+            --depth=1
+          repo sync -c -j$(nproc) --force-sync --no-clone-bundle --no-tags
+
+      - name: Integrate KernelSU
+        working-directory: ${{ steps.build-dir.outputs.path }}/kernel_platform/oneplus13r_v/kernel_platform
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          git submodule update --init --recursive --depth=1
+
+      - name: Apply SUSFS Patches
+        working-directory: ${{ steps.build-dir.outputs.path }}/kernel_platform/oneplus13r_v/kernel_platform
+        run: |
+          set -e
+          cp -r ../../../susfs4ksu/kernel_patches/fs/* ./common/fs/
+          cp -r ../../../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+          
+          patches=(
+            "50_add_susfs_in_gki-android14-6.1.patch"
+            "69_hide_stuff.patch"
+            "next/next_hooks.patch"
+            "next/syscall_hooks.patch"
           )
-          for repo in "${repos[@]}"; do
-            git clone $repo || { echo "Failed to clone $repo"; exit 1; }
+          
+          for patch in "${patches[@]}"; do
+            patch -p1 --forward < "../../../kernel_patches/${patch}" || true
           done
 
-      - name: Setup Kernel Source
-        working-directory: builds/${{ env.ROOT_DIR }}
-        run: |
-          mkdir -p kernel_platform/${{ env.MODEL_DIR }}
-          cd kernel_platform/${{ env.MODEL_DIR }}
-          repo init -u https://github.com/OnePlusOSS/kernel_manifest.git \
-            -b "${{ inputs.soc_platform }}" \
-            -m "${{ inputs.device_manifest }}" \
-            --depth=1
-          repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
-
-      - name: Setup KernelSU
-        working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/${{ env.MODEL_DIR }}/kernel_platform
-        run: |
-          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
-          git submodule update --init --recursive
-          cd KernelSU-Next/kernel
-          KSU_VERSION=$(expr $(/usr/bin/git rev-list --count HEAD) "+" 10200)
-          echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
-          sed -i "s/DKSU_VERSION=11998/DKSU_VERSION=${KSU_VERSION}/" Makefile
-
-      - name: Setup SUSFS
-        working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/${{ env.MODEL_DIR }}/kernel_platform
-        run: |
-          set -euxo pipefail
-          SUSFS_PATCHES="../../../susfs4ksu/kernel_patches"
-          KERNEL_PATCHES="../../../kernel_patches"
-          KSU_NEXT="KernelSU-Next"
-          mkdir -p ./common/fs ./common/include/linux
-          cp "${SUSFS_PATCHES}/fs/"* ./common/fs/
-          cp "${SUSFS_PATCHES}/include/linux/"* ./common/include/linux/
-          cp "${SUSFS_PATCHES}/50_add_susfs_in_gki-android14-6.1.patch" ./common/
-          cp "${KERNEL_PATCHES}/69_hide_stuff.patch" ./common/
-          cp "${KERNEL_PATCHES}/next/next_hooks.patch" ./common/
-          cp "${KERNEL_PATCHES}/next/syscall_hooks.patch" ./common/
-          cd "${KSU_NEXT}"
-          cd ../common
-          patch -p1 -F 3 < syscall_hooks.patch
-          patch -p1 --forward < next_hooks.patch || echo "Warning: KernelSU SUSFS patch may have been already applied or failed."
-          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || echo "Warning: SUSFS patch may have been already applied."
-          patch -p1 -F 3 < 69_hide_stuff.patch || echo "Warning: 69_hide_stuff patch may have been already applied."
-          git diff --quiet --exit-code || (git add -A && git commit -m "BUILD Kernel (SUSFS setup)" || true)
-          cd ..
-          git diff --quiet --exit-code || (git add -A && git commit -m "BUILD Kernel (SUSFS setup)" || true)
-          git rm --cached KernelSU-Next || true
-
-      - name: Configure Kernel
-        working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/${{ env.MODEL_DIR }}/kernel_platform
+      - name: Configure Kernel Options
+        working-directory: ${{ steps.build-dir.outputs.path }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
           set -e
           CONFIGS=(
@@ -204,13 +149,13 @@ jobs:
             "CONFIG_IP6_NF_MATCH_HL=y"
             "CONFIG_SCHED_CLASS_EXT=y"
             "CONFIG_SMP=y"
-            "CONFIG_TCP_CONG_ADVANCED=y"
-            "CONFIG_TCP_CONG_BBR=y"
-            "CONFIG_NET_SCH_FQ=y"
-            "CONFIG_TCP_CONG_BIC=n"
-            "CONFIG_TCP_CONG_WESTWOOD=n"
-            "CONFIG_TCP_CONG_HTCP=n"
-            "CONFIG_CONFIG_LTO=y"
+            #"CONFIG_TCP_CONG_ADVANCED=y"
+            #"CONFIG_TCP_CONG_BBR=y"
+            #"CONFIG_NET_SCH_FQ=y"
+            #"CONFIG_TCP_CONG_BIC=n"
+            #"CONFIG_TCP_CONG_WESTWOOD=n"
+            #"CONFIG_TCP_CONG_HTCP=n"
+            "CONFIG_LTO=y"
             "CONFIG_LTO_CLANG_FULL=y"
             "CONFIG_LTO_CLANG_THIN=n"
           )
@@ -219,8 +164,8 @@ jobs:
           done
           sed -i '2s/check_defconfig//' ./common/build.config.gki
 
-      - name: Run sed and perl Commands
-        working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/${{ env.MODEL_DIR }}/kernel_platform
+      - name: Clean Kernel Version Strings
+        working-directory: ${{ steps.build-dir.outputs.path }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
           sed -i 's/check_defconfig//' ./common/build.config.gki
           sed -i '$s|echo "\$res"|echo "\$res"|' ./common/scripts/setlocalversion
@@ -233,37 +178,41 @@ jobs:
           sed -i 's/-dirty//' ./build/kernel/kleaf/workspace_status_stamp.py || echo "No workspace_status_stamp.py!"
 
       - name: Build Kernel
-        working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/${{ env.MODEL_DIR }}
+        working-directory: ${{ steps.build-dir.outputs.path }}/kernel_platform/oneplus13r_v
         run: |
+          export KBUILD_BUILD_USER="GitHubActions"
+          export KBUILD_BUILD_HOST="gh-runner"
+          
           cd kernel_platform
-          mkdir out
-          export PATH="/usr/lib/ccache:$PATH"
           ./build_with_bazel.py \
-            -t "${{ inputs.build_target }}" \
+            -t pineapple \
             gki \
-            --jobs=$(nproc --all) \
+            --jobs=$(nproc) \
             --verbose_failures \
             --config=stamp \
-            --user_kmi_symbol_lists=//msm-kernel:android/abi_gki_aarch64_qcom \
-            --ignore_missing_projects \
-            -o "$(pwd)/out" || { echo "Bazel build failed"; exit 1; }
+            --user_kmi_symbol_lists=//msm-kernel:android/abi_gki_aarch64_qcom
 
-      - name: Create ZIP Package
-        working-directory: builds/${{ env.ROOT_DIR }}
+      - name: Download SUSFS Module
+        working-directory: ${{ steps.build-dir.outputs.path }}/AnyKernel3
         run: |
-          if [ ! -f kernel_platform/${{ env.MODEL_DIR }}/kernel_platform/out/dist/Image ]; then
-            echo "Kernel image not found"; exit 1
-          fi
-          cp kernel_platform/${{ env.MODEL_DIR }}/kernel_platform/out/dist/Image AnyKernel3/Image || { echo "Failed to copy kernel image"; exit 1; }
-          cd AnyKernel3
-          ZIP_NAME="Anykernel3-${MODEL_DIR}.zip"
-          echo "Creating zip file $ZIP_NAME..."
-          zip -r "../$ZIP_NAME" ./* || { echo "Failed to create zip file"; exit 1; }
-          ls -lh "../$ZIP_NAME"
-          echo "zip_name=$ZIP_NAME" >> $GITHUB_ENV
+          wget -q --show-progress \
+            https://github.com/sidex15/ksu_module_susfs/releases/latest/download/ksu_module_susfs_1.5.2+.zip \
+            -O susfs_module.zip
+          unzip -oj susfs_module.zip
+          rm susfs_module.zip
 
-      - name: Upload Build Artifacts
+      - name: Package Kernel Image
+        working-directory: ${{ steps.build-dir.outputs.path }}
+        run: |
+          cp kernel_platform/oneplus13r_v/kernel_platform/out/dist/Image AnyKernel3/
+          
+          cd AnyKernel3
+          zip_name="WildPlusKernel-OP13r-$(date +'%Y%m%d').zip"
+          zip -r9 "../${zip_name}" .
+          echo "ZIP_PATH=${zip_name}" >> $GITHUB_ENV
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: kernel-${{ env.ROOT_DIR }}
-          path: builds/${{ env.ROOT_DIR }}/*.zipbasic workflow to help you get started with Actions
+          path: ${{ steps.build-dir.outputs.path }}/${{ env.ZIP_PATH }}
