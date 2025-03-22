@@ -174,25 +174,28 @@ jobs:
             --config=stamp \
             --user_kmi_symbol_lists=//msm-kernel:android/abi_gki_aarch64_qcom
 
-      - name: Verify Kernel Image Exists
-        working-directory: ${{ steps.build-dir.outputs.path }}
+      - name: Create ZIP Package
+        working-directory: builds/${{ env.ROOT_DIR }}
         run: |
-          echo "Build artifacts:"
-          ls -lR kernel_platform/oneplus13r_v/out/dist/
-          [ -f kernel_platform/oneplus13r_v/out/dist/Image ] || { echo "❌ Image file not found!"; exit 1; }
-
-      - name: Package Kernel Image
-        working-directory: ${{ steps.build-dir.outputs.path }}
-        run: |
-          cp kernel_platform/oneplus13r_v/out/dist/Image AnyKernel3/
-          
+          if [ ! -f kernel_platform/oneplus13r_v/kernel_platform/out/dist/Image ]; then
+            echo "Kernel image not found"; exit 1
+          fi
+          cp kernel_platform/oneplus13r_v/kernel_platform/out/dist/Image AnyKernel3/Image || { echo "Failed to copy kernel image"; exit 1; }
           cd AnyKernel3
-          zip_name="AK3-OP13r-$(date +'%Y%m%d').zip"
-          zip -r9 "../${zip_name}" .
-          echo "ZIP_PATH=${zip_name}" >> $GITHUB_ENV
+          ZIP_NAME="Anykernel3-OP13r.zip"
+          echo "Creating zip file $ZIP_NAME..."
+          zip -r "../$ZIP_NAME" ./* || { echo "Failed to create zip file"; exit 1; }
+          ls -lh "../$ZIP_NAME"
+          echo "zip_name=$ZIP_NAME" >> $GITHUB_ENV
 
-      - name: Upload Artifact
+      - name: Download SUSFS Module
+        run: |
+         wget https://github.com/sidex15/ksu_module_susfs/releases/latest/download/ksu_module_susfs_1.5.2+.zip
+         cp ksu_module_susfs_1.5.2+.zip ./AnyKernel3/
+
+      # Step 15: Upload build artifacts
+      - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel-${{ env.ROOT_DIR }}
-          path: ${{ steps.build-dir.outputs.path }}/${{ env.ZIP_PATH }}
+          path: builds/${{ env.ROOT_DIR }}/*.zip
