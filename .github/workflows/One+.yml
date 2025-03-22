@@ -86,25 +86,41 @@ jobs:
         working-directory: ${{ steps.build-dir.outputs.path }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
           curl -fsSL "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
-          git submodule update --init --recursive --depth=1
+          git submodule update --init --recursive
+          cd KernelSU-Next/kernel
+          KSU_VERSION=$(expr $(/usr/bin/git rev-list --count HEAD) "+" 10200)
+          echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+          sed -i "s/DKSU_VERSION=11998/DKSU_VERSION=${KSU_VERSION}/" Makefile
 
       - name: Apply SUSFS Patches
         working-directory: ${{ steps.build-dir.outputs.path }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
-          set -e
-          cp -r ../../../susfs4ksu/kernel_patches/fs/* ./common/fs/
-          cp -r ../../../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+          set -euxo pipefail
+          SUSFS_PATCHES="../../../susfs4ksu/kernel_patches"
+          KERNEL_PATCHES="../../../kernel_patches"
+          KSU_NEXT="KernelSU-Next"
+          mkdir -p ./common/fs ./common/include/linux
+          cp "${SUSFS_PATCHES}/fs/"* ./common/fs/
+          cp "${SUSFS_PATCHES}/include/linux/"* ./common/include/linux/
+          #cp "${SUSFS_PATCHES}/KernelSU/10_enable_susfs_for_ksu.patch" "${KSU_NEXT}/"
+          cp "${SUSFS_PATCHES}/50_add_susfs_in_gki-android14-6.1.patch" ./common/
+          cp "${KERNEL_PATCHES}/69_hide_stuff.patch" ./common/
+          cp "${KERNEL_PATCHES}/next/next_hooks.patch" ./common/
+          cp "${KERNEL_PATCHES}/next/syscall_hooks.patch" ./common/
+          #cp "${KERNEL_PATCHES}/0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch" "${KSU_NEXT}/"
+          cd "${KSU_NEXT}"
+          #patch -p1 --forward < 0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch || echo "Warning: KernelSU SUSFS patch may have been already applied or failed."
+          cd ../common
+          patch -p1 -F 3 < syscall_hooks.patch
+          patch -p1 --forward < next_hooks.patch || echo "Warning: KernelSU SUSFS patch may have been already applied or failed."
+          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || echo "Warning: SUSFS patch may have been already applied."
+          patch -p1 -F 3 < 69_hide_stuff.patch || echo "Warning: 69_hide_stuff patch may have been already applied."
           
-          patches=(
-            "50_add_susfs_in_gki-android14-6.1.patch"
-            "69_hide_stuff.patch"
-            "next/next_hooks.patch"
-            "next/syscall_hooks.patch"
-          )
-          
-          for patch in "${patches[@]}"; do
-            patch -p1 --forward < "../../../kernel_patches/${patch}" || true
-          done
+          #sed -i '/obj-$(CONFIG_KSU_SUSFS_SUS_SU) += sus_su.o/d' ./fs/Makefile
+          git diff --quiet --exit-code || (git add -A && git commit -m "BUILD Kernel (SUSFS setup)" || true)
+          cd ..
+          git diff --quiet --exit-code || (git add -A && git commit -m "BUILD Kernel (SUSFS setup)" || true)
+          git rm --cached KernelSU-Next || true
 
       - name: Configure Kernel Options
         working-directory: ${{ steps.build-dir.outputs.path }}/kernel_platform/oneplus13r_v/kernel_platform
@@ -142,9 +158,9 @@ jobs:
             #"CONFIG_TCP_CONG_BIC=n"
             #"CONFIG_TCP_CONG_WESTWOOD=n"
             #"CONFIG_TCP_CONG_HTCP=n"
-            "CONFIG_LTO=y"
-            "CONFIG_LTO_CLANG_FULL=y"
-            "CONFIG_LTO_CLANG_THIN=n"
+            #"CONFIG_LTO=y"
+            #"CONFIG_LTO_CLANG_FULL=y"
+            #"CONFIG_LTO_CLANG_THIN=n"
           )
           for CONFIG in "${CONFIGS[@]}"; do
             echo "$CONFIG" >> ./common/arch/arm64/configs/gki_defconfig
@@ -154,6 +170,11 @@ jobs:
       - name: Clean Kernel Version Strings
         working-directory: ${{ steps.build-dir.outputs.path }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
+          echo "Running sed commands..."
+          sed -i 's/CONFIG_LTO=n/CONFIG_LTO=y/' "./common/arch/arm64/configs/gki_defconfig"
+          sed -i 's/CONFIG_LTO_CLANG_THIN=y/CONFIG_LTO_CLANG_FULL=y/' "./common/arch/arm64/configs/gki_defconfig"
+          sed -i 's/CONFIG_LTO_CLANG_NONE=y/CONFIG_LTO_CLANG_FULL=y/' "./common/arch/arm64/configs/gki_defconfig"
+          #Run sed commands for modifications
           sed -i 's/check_defconfig//' ./common/build.config.gki
           sed -i '$s|echo "\$res"|echo "\$res"|' ./common/scripts/setlocalversion
           sed -i '$s|echo "\$res"|echo "\$res"|' ./msm-kernel/scripts/setlocalversion
