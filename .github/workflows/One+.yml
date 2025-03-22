@@ -51,7 +51,7 @@ jobs:
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: lto-build-${{ hashFiles('**/gki_defconfig') }}
-          max-size: 4G
+          max-size: 2G
           
       - name: Setup Python Environment
         run: |
