@@ -205,7 +205,6 @@ jobs:
           echo "zip_name=$ZIP_NAME" >> $GITHUB_ENV
 
       - name: Download Latest SUSFS Module from Release
-        if: ${{ inputs.SUSFS_CI == 'true' }}
         run: |
           echo "Downloading the latest SUSFS module from $SUSFS_URL..."
           if wget -q "$SUSFS_URL"; then
