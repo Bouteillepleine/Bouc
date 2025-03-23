@@ -1,4 +1,4 @@
-name: Kernel Build
+name: LTO
 
 on:
   push:
@@ -74,7 +74,7 @@ jobs:
           echo "ROOT_DIR=${ROOT_DIR}" >> $GITHUB_ENV
           mkdir -p "builds/${ROOT_DIR}"
           cd "builds/${ROOT_DIR}"
-      
+      # Step 8: Clone required repositories
       - name: Clone Required Repositories
         working-directory: builds/${{ env.ROOT_DIR }}
         run: |
@@ -86,7 +86,7 @@ jobs:
           for repo in "${repos[@]}"; do
             git clone $repo || { echo "Failed to clone $repo"; exit 1; }
           done
-      
+      # Step 9: Set up kernel source
       - name: Setup Kernel Source
         working-directory: builds/${{ env.ROOT_DIR }}
         run: |
@@ -95,7 +95,7 @@ jobs:
           repo init -u https://github.com/OnePlusOSS/kernel_manifest.git -b oneplus/sm8650 -m oneplus_13r.xml --depth=1 || { echo "Failed to initialize repo"; exit 1; }
           repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags || { echo "Failed to sync repo"; exit 1; }
           rm -rf ./kernel_platform/common/android/abi_gki_protected_exports_*
-      
+      # Step 10: Set up KernelSU
       - name: Setup KernelSU
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
@@ -105,7 +105,7 @@ jobs:
           KSU_VERSION=$(expr $(/usr/bin/git rev-list --count HEAD) "+" 10200)
           echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
           sed -i "s/DKSU_VERSION=11998/DKSU_VERSION=${KSU_VERSION}/" Makefile
-     
+      # Step 11: Set up SUSFS
       - name: Setup SUSFS
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
@@ -135,7 +135,8 @@ jobs:
           cd ..
           git diff --quiet --exit-code || (git add -A && git commit -m "BUILD Kernel (SUSFS setup)" || true)
           git rm --cached KernelSU-Next || true
-      
+      # Step 12: Configure kernel options
+            # Step 12: Configure kernel options
       - name: Configure Kernel
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
@@ -181,7 +182,7 @@ jobs:
             echo "$CONFIG" >> ./common/arch/arm64/configs/gki_defconfig
           done
           sed -i '2s/check_defconfig//' ./common/build.config.gki
-      
+      # Step 13: Run sed and perl Commands
       - name: Run sed and perl Commands
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
@@ -199,7 +200,7 @@ jobs:
           sed -i 's/-dirty//' ./msm-kernel/scripts/setlocalversion
           sed -i 's/-dirty//' ./external/dtc/scripts/setlocalversion
           sed -i 's/-dirty//' ./build/kernel/kleaf/workspace_status_stamp.py || echo "No workspace_status_stamp.py!"
-     
+      # Step 13: Build the kernel
       - name: Build Kernel
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/
         run: |
@@ -229,12 +230,7 @@ jobs:
             echo "❌ Failed to copy kernel image"
             exit 1
           }
-          # Download SUSFS module
-          wget -q -O AnyKernel3/ksu_module_susfs.zip \
-            https://github.com/sidex15/ksu_module_susfs/releases/latest/download/ksu_module_susfs_1.5.2+.zip || {
-            echo "❌ Failed to download SUSFS module"
-            exit 1
-          }
+         
           # Create final package
           cd AnyKernel3
           ZIP_NAME="OP13r-KSU-${KSUVER}.zip"
