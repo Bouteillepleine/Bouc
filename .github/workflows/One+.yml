@@ -57,10 +57,8 @@ jobs:
           ROOT_DIR="${ROOT_DIR_PREFIX}-$(date +'%Y-%m-%d-%I-%M-%p')-release"
           echo "ROOT_DIR=${ROOT_DIR}" >> $GITHUB_ENV
           mkdir -p "builds/${ROOT_DIR}"
-          cd "builds/${ROOT_DIR}"
 
       - name: Clone Required Repositories
-        working-directory: builds/${{ env.ROOT_DIR }}
         run: |
           repos=(
             "https://github.com/Kernel-SU/AnyKernel3 --depth=1"
@@ -68,21 +66,20 @@ jobs:
             "https://github.com/WildPlusKernel/kernel_patches.git"
           )
           for repo in "${repos[@]}"; do
-            git clone $repo || { echo "Failed to clone $repo"; exit 1; }
+            git clone $repo "builds/${{ env.ROOT_DIR }}/$(basename $repo .git)" || { echo "Failed to clone $repo"; exit 1; }
           done
 
       - name: Setup Kernel Source
-        working-directory: builds/${{ env.ROOT_DIR }}
         run: |
-          mkdir -p kernel_platform/oneplus13r_v
-          cd kernel_platform/oneplus13r_v
+          mkdir -p builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v
+          cd builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v
           repo init -u https://github.com/OnePlusOSS/kernel_manifest.git -b oneplus/sm8650 -m oneplus_13r.xml --depth=1 || { echo "Failed to initialize repo"; exit 1; }
           repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags || { echo "Failed to sync repo"; exit 1; }
-          rm -rf ./kernel_platform/common/android/abi_gki_protected_exports_*
+          rm -rf ./common/android/abi_gki_protected_exports_*
 
       - name: Setup KernelSU
-        working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
+          cd builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
           curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
           git submodule update --init --recursive
           cd KernelSU-Next/kernel
@@ -91,9 +88,9 @@ jobs:
           sed -i "s/DKSU_VERSION=11998/DKSU_VERSION=${KSU_VERSION}/" Makefile
 
       - name: Setup SUSFS
-        working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
           set -euxo pipefail
+          cd builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1
           git clone https://github.com/WildPlusKernel/kernel_patches.git
           # Copy files
@@ -115,9 +112,9 @@ jobs:
           patch -p1 -F 3 < syscall_hooks.patch || true
 
       - name: Configure Kernel
-        working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
           set -e
+          cd builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
           CONFIGS=(
             "CONFIG_KSU=y" 
             "CONFIG_KSU_WITH_KPROBES=n" 
@@ -154,9 +151,9 @@ jobs:
           sed -i '2s/check_defconfig//' ./common/build.config.gki
 
       - name: Run sed Commands
-        working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
           echo "Running sed commands..."
+          cd builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
           sed -i 's/CONFIG_LTO=n/CONFIG_LTO=y/' "./common/arch/arm64/configs/gki_defconfig"
           sed -i 's/CONFIG_LTO_CLANG_THIN=y/CONFIG_LTO_CLANG_FULL=y/' "./common/arch/arm64/configs/gki_defconfig"
           sed -i 's/CONFIG_LTO_CLANG_NONE=y/CONFIG_LTO_CLANG_FULL=y/' "./common/arch/arm64/configs/gki_defconfig"
@@ -167,9 +164,8 @@ jobs:
           sed -i 's/-dirty//' ./build/kernel/kleaf/workspace_status_stamp.py || echo "No workspace_status_stamp.py!"
 
       - name: Build Kernel
-        working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/
         run: |
-          cd kernel_platform
+          cd builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
           export LTO=full
           mkdir out
           export PATH="/usr/lib/ccache:$PATH"
@@ -184,8 +180,8 @@ jobs:
             -o "$(pwd)/out" || { echo "Bazel build failed"; exit 1; }
 
       - name: Create ZIP Package
-        working-directory: builds/${{ env.ROOT_DIR }}
         run: |
+          cd builds/${{ env.ROOT_DIR }}
           if [ ! -f kernel_platform/oneplus13r_v/kernel_platform/out/dist/Image ]; then
             echo "❌ Kernel image not found"
             exit 1
