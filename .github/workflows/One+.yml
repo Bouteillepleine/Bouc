@@ -11,6 +11,7 @@ env:
   ROOT_DIR_PREFIX: "OP13r-A15"
   BRANCH: "android14-6.1"
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  SUSFS_URL: "https://github.com/sidex15/ksu_module_susfs/releases/latest/download/ksu_module_susfs_1.5.2+.zip"
 
 jobs:
   build-release:
@@ -31,30 +32,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            python3-pip \
-            curl \
-            git \
-            zip \
-            unzip \
-            gcc \
-            g++ \
-            make \
-            ninja-build \
-            file \
-            bc \
-            bison \
-            flex \
-            libssl-dev \
-            libelf-dev \
-            wget \
-            build-essential \
-            python3-dev \
-            python3-setuptools \
-            rsync \
-            ccache \
-            cmake \
-            libdw-dev \
-            zlib1g-dev
+            python3-pip curl git zip unzip gcc g++ make ninja-build file \
+            bc bison flex libssl-dev libelf-dev wget build-essential \
+            python3-dev python3-setuptools rsync ccache cmake libdw-dev zlib1g-dev
 
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -116,44 +96,42 @@ jobs:
           set -euxo pipefail
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1
           git clone https://github.com/WildPlusKernel/kernel_patches.git
-
           # Copy files
           cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch ./common/
           cp kernel_patches/next/0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch ./KernelSU-Next/
           cp kernel_patches/next/syscall_hooks.patch ./common/
           cp susfs4ksu/kernel_patches/fs/* ./common/fs/
           cp susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
-
           # Apply patches
           cd ./KernelSU-Next
           patch -p1 < 0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch || true
           cd ../common
           patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || true
-
           # Copy and apply hide_stuff patch
           if [ -f kernel_patches/69_hide_stuff.patch ]; then
             cp kernel_patches/69_hide_stuff.patch ./
             patch -p1 -F 3 < 69_hide_stuff.patch || true
           fi
           patch -p1 -F 3 < syscall_hooks.patch || true
+
       - name: Configure Kernel
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
           set -e
           CONFIGS=(
-            "CONFIG_KSU=y"
-            "CONFIG_KSU_WITH_KPROBES=n"
+            "CONFIG_KSU=y" 
+            "CONFIG_KSU_WITH_KPROBES=n" 
             "CONFIG_KSU_SUSFS=y"
-            "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y"
-            "CONFIG_KSU_SUSFS_SUS_PATH=y"
+            "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" 
+            "CONFIG_KSU_SUSFS_SUS_PATH=y" 
             "CONFIG_KSU_SUSFS_SUS_MOUNT=y"
             "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y"
-            "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y"
+            "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" 
             "CONFIG_KSU_SUSFS_SUS_KSTAT=y"
             "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n"
-            "CONFIG_KSU_SUSFS_TRY_UMOUNT=y"
+            "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" 
             "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y"
-            "CONFIG_KSU_SUSFS_SPOOF_UNAME=y"
+            "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" 
             "CONFIG_KSU_SUSFS_ENABLE_LOG=y"
             "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y"
             "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
@@ -225,6 +203,23 @@ jobs:
           }
           ls -lh "../$ZIP_NAME"
           echo "zip_name=$ZIP_NAME" >> $GITHUB_ENV
+
+      - name: Download Latest SUSFS Module from Release
+        if: ${{ inputs.SUSFS_CI == 'false' }}
+        run: |
+          echo "Downloading the latest SUSFS module from $SUSFS_URL..."
+          if wget -q "$SUSFS_URL"; then
+            echo "Download successful."
+            cp ksu_module_susfs_1.5.2+.zip AnyKernel3/
+            echo "Module copied to AnyKernel3/"
+            
+            # Commit the changes (if applicable)
+            git add AnyKernel3/ksu_module_susfs_1.5.2+.zip
+            git commit -m "Add latest SUSFS module version 1.5.2+"
+          else
+            echo "Error: Failed to download the SUSFS module."
+            exit 1
+          fi
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
