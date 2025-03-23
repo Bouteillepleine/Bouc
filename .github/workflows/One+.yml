@@ -242,7 +242,6 @@ jobs:
           else
             echo "Error: Failed to download the SUSFS module."
             exit 1
-          fi
 
   upload-artifacts:
     runs-on: ubuntu-latest
