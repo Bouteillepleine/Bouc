@@ -8,10 +8,10 @@ on:
 
 env:
   DEBIAN_FRONTEND: noninteractive
-  ROOT_DIR_PREFIX: "OP13r-A15"
-  BRANCH: "android14-6.1"
+  ROOT_DIR_PREFIX: OP13r-A15
+  BRANCH: android14-6.1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  SUSFS_URL: "https://github.com/sidex15/ksu_module_susfs/releases/latest/download/ksu_module_susfs_1.5.2+.zip"
+  SUSFS_URL: https://github.com/sidex15/ksu_module_susfs/releases/latest/download/ksu_module_susfs_1.5.2+.zip
 
 jobs:
   build-release:
@@ -37,9 +37,12 @@ jobs:
             python3-dev python3-setuptools rsync ccache cmake libdw-dev zlib1g-dev
 
       - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: actions/cache@v3
         with:
-          max-size: 2G
+          path: ~/.ccache
+          key: ${{ runner.os }}-ccache-${{ hashFiles('**/ccache.conf') }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
 
       - name: Setup Python and Repo Tool
         run: |
@@ -178,6 +181,7 @@ jobs:
             gki \
             --jobs=$(nproc --all) \
             --verbose_failures \
+            --sandbox_debug \
             --config=stamp \
             --user_kmi_symbol_lists=//msm-kernel:android/abi_gki_aarch64_qcom \
             --ignore_missing_projects \
