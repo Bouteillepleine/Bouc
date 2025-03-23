@@ -131,7 +131,8 @@ jobs:
           patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || true
 
           # Copy and apply hide_stuff patch
-          cp kernel_patches/69_hide_stuff.patch ./  # Verify path in your repo!
+          if [ -f kernel_patches/69_hide_stuff.patch ]; then
+          cp kernel_patches/69_hide_stuff.patch
           patch -p1 -F 3 < 69_hide_stuff.patch
           patch -p1 -F 3 < syscall_hooks.patch
 
