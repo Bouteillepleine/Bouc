@@ -96,21 +96,27 @@ jobs:
           KSU_VERSION=$(expr $(/usr/bin/git rev-list --count HEAD) "+" 10200)
           echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
           sed -i "s/DKSU_VERSION=11998/DKSU_VERSION=${KSU_VERSION}/" Makefile
-
+          
           # Setup SUSFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1
           git clone https://github.com/WildPlusKernel/kernel_patches.git
+
+          # Ensure the common directory exists before copying files
+          mkdir -p ./common/fs
+          mkdir -p ./common/include/linux
+          
           cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch ./common/
           cp kernel_patches/next/0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch ./KernelSU-Next/
           cp kernel_patches/next/syscall_hooks.patch ./common/
           cp susfs4ksu/kernel_patches/fs/* ./common/fs/
           cp susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+
           cd ./KernelSU-Next
           patch -p1 < 0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch || true
           cd ../common
           patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || true
 
-          # Apply additional patches
+          # Apply additional patches if they exist
           if [ -f kernel_patches/69_hide_stuff.patch ]; then
             cp kernel_patches/69_hide_stuff.patch ./
             patch -p1 -F 3 < 69_hide_stuff.patch || true
@@ -173,7 +179,7 @@ jobs:
           set -e
           cd kernel_platform
           export LTO=full
-          mkdir out
+          mkdir -p out
           export PATH="/usr/lib/ccache:$PATH"
           ./build_with_bazel.py \
             -t pineapple \
@@ -240,4 +246,3 @@ jobs:
         with:
           name: kernel-${{ env.ROOT_DIR }}
           path: builds/${{ env.ROOT_DIR }}/*.zip
-
