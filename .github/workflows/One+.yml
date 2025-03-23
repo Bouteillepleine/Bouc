@@ -24,12 +24,14 @@ jobs:
 
       - name: Free Disk Space
         run: |
+          set -e
           sudo apt-get update -qq
           sudo apt-get install -qq curl
           curl -fsSL https://raw.githubusercontent.com/kou/arrow/e49d8ae15583ceff03237571569099a6ad62be32/ci/scripts/util_free_space.sh | bash
 
       - name: Setup Build Environment
         run: |
+          set -e
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             python3-pip curl git zip unzip gcc g++ make ninja-build file \
@@ -43,6 +45,7 @@ jobs:
 
       - name: Setup Python and Repo Tool
         run: |
+          set -e
           python3 -m pip install --upgrade pip
           pip3 install gitpython xmltodict
           mkdir -p ~/.bin
@@ -54,6 +57,7 @@ jobs:
 
       - name: Configure Build Directory
         run: |
+          set -e
           ROOT_DIR="${ROOT_DIR_PREFIX}-$(date +'%Y-%m-%d-%I-%M-%p')-release"
           echo "ROOT_DIR=${ROOT_DIR}" >> $GITHUB_ENV
           mkdir -p "builds/${ROOT_DIR}"
@@ -62,6 +66,7 @@ jobs:
       - name: Clone Required Repositories
         working-directory: builds/${{ env.ROOT_DIR }}
         run: |
+          set -e
           repos=(
             "https://github.com/Kernel-SU/AnyKernel3 --depth=1"
             "https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1"
@@ -74,15 +79,17 @@ jobs:
       - name: Setup Kernel Source
         working-directory: builds/${{ env.ROOT_DIR }}
         run: |
+          set -e
           mkdir -p kernel_platform/oneplus13r_v
           cd kernel_platform/oneplus13r_v
           repo init -u https://github.com/OnePlusOSS/kernel_manifest.git -b oneplus/sm8650 -m oneplus_13r.xml --depth=1 || { echo "Failed to initialize repo"; exit 1; }
           repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags || { echo "Failed to sync repo"; exit 1; }
           rm -rf ./kernel_platform/common/android/abi_gki_protected_exports_*
 
-      - name: Setup KernelSU
+      - name: Setup KernelSU and SUSFS
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
+          set -e
           curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
           git submodule update --init --recursive
           cd KernelSU-Next/kernel
@@ -90,24 +97,20 @@ jobs:
           echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
           sed -i "s/DKSU_VERSION=11998/DKSU_VERSION=${KSU_VERSION}/" Makefile
 
-      - name: Setup SUSFS
-        working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
-        run: |
-          set -euxo pipefail
+          # Setup SUSFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1
           git clone https://github.com/WildPlusKernel/kernel_patches.git
-          # Copy files
           cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch ./common/
           cp kernel_patches/next/0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch ./KernelSU-Next/
           cp kernel_patches/next/syscall_hooks.patch ./common/
           cp susfs4ksu/kernel_patches/fs/* ./common/fs/
           cp susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
-          # Apply patches
           cd ./KernelSU-Next
           patch -p1 < 0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch || true
           cd ../common
           patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || true
-          # Copy and apply hide_stuff patch
+
+          # Apply additional patches
           if [ -f kernel_patches/69_hide_stuff.patch ]; then
             cp kernel_patches/69_hide_stuff.patch ./
             patch -p1 -F 3 < 69_hide_stuff.patch || true
@@ -137,14 +140,11 @@ jobs:
             "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y"
             "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y"
             "CONFIG_KSU_SUSFS_SUS_SU=n"
-            # Filesystem
             "CONFIG_TMPFS_XATTR=y"
             "CONFIG_TMPFS_POSIX_ACL=y"
-            # Network
             "CONFIG_IP_NF_TARGET_TTL=y"
             "CONFIG_IP6_NF_TARGET_HL=y"
             "CONFIG_IP6_NF_MATCH_HL=y"
-            # Scheduler
             "CONFIG_SCHED_CLASS_EXT=y"
             "CONFIG_SMP=y"
           )
@@ -156,6 +156,7 @@ jobs:
       - name: Run sed Commands
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
+          set -e
           echo "Running sed commands..."
           sed -i 's/CONFIG_LTO=n/CONFIG_LTO=y/' "./common/arch/arm64/configs/gki_defconfig"
           sed -i 's/CONFIG_LTO_CLANG_THIN=y/CONFIG_LTO_CLANG_FULL=y/' "./common/arch/arm64/configs/gki_defconfig"
@@ -169,6 +170,7 @@ jobs:
       - name: Build Kernel
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/
         run: |
+          set -e
           cd kernel_platform
           export LTO=full
           mkdir out
@@ -186,6 +188,7 @@ jobs:
       - name: Create ZIP Package
         working-directory: builds/${{ env.ROOT_DIR }}
         run: |
+          set -e
           if [ ! -f kernel_platform/oneplus13r_v/kernel_platform/out/dist/Image ]; then
             echo "❌ Kernel image not found"
             exit 1
@@ -207,17 +210,28 @@ jobs:
       - name: Download Latest SUSFS Module from Release
         if: ${{ inputs.SUSFS_CI == 'false' }}
         run: |
+          set -e  # Exit on any error
           echo "Downloading the latest SUSFS module from $SUSFS_URL..."
-          if wget -q "$SUSFS_URL"; then
+          
+          # Download the SUSFS module
+          wget -q "$SUSFS_URL" -O ksu_module_susfs.zip || { 
+            echo "Error: Failed to download the SUSFS module."; 
+            exit 1; 
+          }
+          
+          # Check if the downloaded zip file exists
+          if [ -f ksu_module_susfs.zip ]; then
             echo "Download successful."
-            cp ksu_module_susfs_1.5.2+.zip AnyKernel3/
-            echo "Module copied to AnyKernel3/"
             
-            # Commit the changes (if applicable)
-            git add AnyKernel3/ksu_module_susfs_1.5.2+.zip
-            git commit -m "Add latest SUSFS module version 1.5.2+"
+            # Unzip the module to check its contents
+            unzip -q ksu_module_susfs.zip -d AnyKernel3/ || {
+              echo "Error: Failed to unzip the SUSFS module.";
+              exit 1;
+            }
+            
+            echo "Module copied to AnyKernel3/"
           else
-            echo "Error: Failed to download the SUSFS module."
+            echo "Error: Downloaded file not found."
             exit 1
           fi
 
@@ -226,3 +240,4 @@ jobs:
         with:
           name: kernel-${{ env.ROOT_DIR }}
           path: builds/${{ env.ROOT_DIR }}/*.zip
+
