@@ -66,7 +66,11 @@ jobs:
             "https://github.com/WildPlusKernel/kernel_patches.git"
           )
           for repo in "${repos[@]}"; do
-            git clone $repo "builds/${{ env.ROOT_DIR }}/$(basename $repo .git)" || { echo "Failed to clone $repo"; exit 1; }
+            repo_name=$(basename -s .git "${repo%% *}")
+            if [ -d "builds/${{ env.ROOT_DIR }}/${repo_name}" ]; then
+              rm -rf "builds/${{ env.ROOT_DIR }}/${repo_name}"
+            fi
+            git clone $repo "builds/${{ env.ROOT_DIR }}/${repo_name}" || { echo "Failed to clone $repo"; exit 1; }
           done
 
       - name: Setup Kernel Source
