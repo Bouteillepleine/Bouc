@@ -5,6 +5,15 @@ on:
     branches:
       - main
   workflow_dispatch:
+   inputs:     
+      ANDROID_VERSION:
+        description: "Android"
+        required: true
+        default: 'android14'
+      KERNEL_VERSION:
+        description: "Version"
+        required: true
+        default: '6.1'      
 
 env:
   DEBIAN_FRONTEND: noninteractive
@@ -110,31 +119,24 @@ jobs:
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
           set -euxo pipefail
-          SUSFS_PATCHES="../../../susfs4ksu/kernel_patches"
-          KERNEL_PATCHES="../../../kernel_patches"
-          KSU_NEXT="KernelSU-Next"
-          mkdir -p ./common/fs ./common/include/linux
-          cp "${SUSFS_PATCHES}/fs/"* ./common/fs/
-          cp "${SUSFS_PATCHES}/include/linux/"* ./common/include/linux/
-          #cp "${SUSFS_PATCHES}/KernelSU/10_enable_susfs_for_ksu.patch" "${KSU_NEXT}/"
-          cp "${SUSFS_PATCHES}/50_add_susfs_in_gki-android14-6.1.patch" ./common/
-          cp "${KERNEL_PATCHES}/69_hide_stuff.patch" ./common/
-          cp "${KERNEL_PATCHES}/next/next_hooks.patch" ./common/
-          cp "${KERNEL_PATCHES}/next/syscall_hooks.patch" ./common/
-          #cp "${KERNEL_PATCHES}/0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch" "${KSU_NEXT}/"
-          cd "${KSU_NEXT}"
-          #patch -p1 --forward < 0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch || echo "Warning: KernelSU SUSFS patch may have been already applied or failed."
+          cd kernel_workspace
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}
+          git clone https://github.com/WildPlusKernel/kernel_patches.git
+          cd kernel_platform
+          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch ./common/
+          cp ../kernel_patches/next/0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch ./KernelSU-Next/
+          cp ../kernel_patches/next/syscall_hooks.patch ./common/
+          cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
+          cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+          # Apply patches
+          cd ./KernelSU-Next
+          patch -p1 < 0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch || true
           cd ../common
+          patch -p1 < 50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch || true
+          # Replace next_hooks.patch with syscall_hooks.patch
+          cp ../../kernel_patches/69_hide_stuff.patch ./
+          patch -p1 -F 3 < 69_hide_stuff.patch
           patch -p1 -F 3 < syscall_hooks.patch
-          patch -p1 --forward < next_hooks.patch || echo "Warning: KernelSU SUSFS patch may have been already applied or failed."
-          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || echo "Warning: SUSFS patch may have been already applied."
-          patch -p1 -F 3 < 69_hide_stuff.patch || echo "Warning: 69_hide_stuff patch may have been already applied."
-          
-          #sed -i '/obj-$(CONFIG_KSU_SUSFS_SUS_SU) += sus_su.o/d' ./fs/Makefile
-          git diff --quiet --exit-code || (git add -A && git commit -m "BUILD Kernel (SUSFS setup)" || true)
-          cd ..
-          git diff --quiet --exit-code || (git add -A && git commit -m "BUILD Kernel (SUSFS setup)" || true)
-          git rm --cached KernelSU-Next || true
       # Step 12: Configure kernel options
             # Step 12: Configure kernel options
       - name: Configure Kernel
@@ -205,6 +207,7 @@ jobs:
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/
         run: |
           cd kernel_platform
+          export LTO=full
           mkdir out
           export PATH="/usr/lib/ccache:$PATH"
           ./build_with_bazel.py \
