@@ -20,6 +20,8 @@ env:
   ROOT_DIR_PREFIX: "OP13r-A15"
   BRANCH: "android14-6.1"
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  ANDROID_VERSION: ${{ github.event.inputs.ANDROID_VERSION || 'android14' }}
+  KERNEL_VERSION: ${{ github.event.inputs.KERNEL_VERSION || '6.1' }}
 
 jobs:
   build-release:
@@ -118,25 +120,23 @@ jobs:
       - name: Setup SUSFS
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
-          set -euxo pipefail
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}
-          git clone https://github.com/WildPlusKernel/kernel_patches.git
-          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch ./common/
-          cp ../kernel_patches/next/0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch ./KernelSU-Next/
-          cp ../kernel_patches/next/syscall_hooks.patch ./common/
-          cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
-          cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
-          # Apply patches
-          cd ./KernelSU-Next
-          patch -p1 < 0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch || true
-          cd ../common
-          patch -p1 < 50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch || true
-          # Replace next_hooks.patch with syscall_hooks.patch
-          cp ../../kernel_patches/69_hide_stuff.patch ./
-          patch -p1 -F 3 < 69_hide_stuff.patch
-          patch -p1 -F 3 < syscall_hooks.patch
-      # Step 12: Configure kernel options
-            # Step 12: Configure kernel options
+         set -euxo pipefail
+         git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-${ANDROID_VERSION}-${KERNEL_VERSION}
+         git clone https://github.com/WildPlusKernel/kernel_patches.git
+         cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${ANDROID_VERSION}-${KERNEL_VERSION}.patch ./common/
+         cp ../kernel_patches/next/0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch ./KernelSU-Next/
+         cp ../kernel_patches/next/syscall_hooks.patch ./common/
+         cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
+         cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+         # Apply patches
+         cd ./KernelSU-Next
+         patch -p1 < 0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch || true
+         cd ../common
+         patch -p1 < 50_add_susfs_in_gki-${ANDROID_VERSION}-${KERNEL_VERSION}.patch || true
+         # Replace next_hooks.patch with syscall_hooks.patch
+         cp ../../kernel_patches/69_hide_stuff.patch ./
+         patch -p1 -F 3 < 69_hide_stuff.patch
+         patch -p1 -F 3 < syscall_hooks.patch
       - name: Configure Kernel
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
