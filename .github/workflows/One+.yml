@@ -141,6 +141,7 @@ jobs:
             # Filesystem
             "CONFIG_TMPFS_XATTR=y"
             "CONFIG_TMPFS_POSIX_ACL=y"
+            "CONFIG_USB_OTG=y"
             # Network
             "CONFIG_IP_NF_TARGET_TTL=y"
             "CONFIG_IP6_NF_TARGET_HL=y"
@@ -148,6 +149,11 @@ jobs:
             # Scheduler
             "CONFIG_SCHED_CLASS_EXT=y"
             "CONFIG_SMP=y"
+            "CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y"
+            "CONFIG_MSM_PERFORMANCE=y"
+            # power consumption
+            "CONFIG_NO_HZ_IDLE=y"
+            "CONFIG_PM_SLEEP_SMP=y"
           )
           for CONFIG in "${CONFIGS[@]}"; do
             echo "$CONFIG" >> ./common/arch/arm64/configs/gki_defconfig
