@@ -4,12 +4,6 @@ on:
     branches:
       - main
   workflow_dispatch:
-    inputs:
-      SUSFS_CI:
-        type: boolean
-        description: "Download and include the latest SUSFS module from release (for SUSFS CI)"
-        required: false
-        default: false
 env:
   DEBIAN_FRONTEND: noninteractive
   ROOT_DIR_PREFIX: "OP13r-A15"
@@ -155,7 +149,6 @@ jobs:
             # Scheduler (Keep existing)
             "CONFIG_SCHED_CLASS_EXT=y"
             "CONFIG_SMP=y"
-            "CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y"
             "CONFIG_MSM_PERFORMANCE=y"
             # Power consumption - Enable zRAM for better memory management
             "CONFIG_NO_HZ_IDLE=y"
@@ -177,6 +170,22 @@ jobs:
           sed -i 's/-dirty//' ./msm-kernel/scripts/setlocalversion
           sed -i 's/-dirty//' ./external/dtc/scripts/setlocalversion
           sed -i 's/-dirty//' ./build/kernel/kleaf/workspace_status_stamp.py || echo "No workspace_status_stamp.py!"
+      - name: Build Kernel
+        working-directory: ${{ env.BUILD_WORKSPACE }}/kernel_platform/oneplus13r_v/kernel_platform
+        run: |
+          cd kernel_platform
+          export LTO=full
+          mkdir out
+          export PATH="/usr/lib/ccache:$PATH"
+          ./build_with_bazel.py \
+            -t pineapple \
+            gki \
+            --jobs=$(nproc --all) \
+            --verbose_failures \
+            --config=stamp \
+            --user_kmi_symbol_lists=//msm-kernel:android/abi_gki_aarch64_qcom \
+            --ignore_missing_projects \
+            -o "$(pwd)/out" || { echo "Bazel build failed"; exit 1; }
       - name: Create ZIP Package
         working-directory: ${{ env.BUILD_WORKSPACE }}
         run: |
