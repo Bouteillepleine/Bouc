@@ -1,5 +1,4 @@
-name: LTO
-
+name: LTOon
 on:
   push:
     branches:
@@ -11,7 +10,6 @@ on:
         description: "Download and include the latest SUSFS module from release (for SUSFS CI)"
         required: false
         default: false
-
 env:
   DEBIAN_FRONTEND: noninteractive
   ROOT_DIR_PREFIX: "OP13r-A15"
@@ -19,7 +17,6 @@ env:
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   SUSFS_URL: "https://github.com/sidex15/ksu_module_susfs/releases/latest/download/ksu_module_susfs_1.5.2+.zip"
   KERNEL_PLATFORM_PATH: "kernel_platform/oneplus13r_v/kernel_platform" # Define a constant for the kernel platform path
-
 jobs:
   build-release:
     runs-on: ubuntu-latest
@@ -28,13 +25,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-
       - name: Free Disk Space
         run: |
           sudo apt-get update -qq
           sudo apt-get install -qq curl
           curl -fsSL https://raw.githubusercontent.com/kou/arrow/e49d8ae15583ceff03237571569099a6ad62be32/ci/scripts/util_free_space.sh | bash
-
       - name: Setup Build Environment
         run: |
           sudo apt-get update
@@ -42,12 +37,10 @@ jobs:
             python3-pip curl git zip unzip gcc g++ make ninja-build file \
             bc bison flex libssl-dev libelf-dev wget build-essential \
             python3-dev python3-setuptools rsync ccache cmake libdw-dev zlib1g-dev
-
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           max-size: 2G
-
       - name: Setup Python and Repo Tool
         run: |
           python3 -m pip install --upgrade pip
@@ -58,15 +51,14 @@ jobs:
           echo "$HOME/.bin" >> $GITHUB_PATH
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "actions@github.com"
-
       - name: Configure Build Directory
         run: |
-          ROOT_DIR="${ROOT_DIR_PREFIX}-$(date +'%Y-%m-%d-%H-%M-%S')-release" # Use HH for 24-hour format for better sorting
+          ROOT_DIR="${ROOT_DIR_PREFIX}-$(date +'%Y-%m-%d-%H-%M')-release" # Use HH for 24-hour format for better sorting, removed seconds
           echo "ROOT_DIR=${ROOT_DIR}" >> $GITHUB_ENV
-          echo "BUILD_WORKSPACE=$(pwd)/builds/${ROOT_DIR}" >> $GITHUB_ENV # Define the full build workspace path
-          mkdir -p "${{ env.BUILD_WORKSPACE }}"
-          cd "${{ env.BUILD_WORKSPACE }}"
-
+          BUILD_WORKSPACE=$(pwd)/builds/${ROOT_DIR}
+          echo "BUILD_WORKSPACE=${BUILD_WORKSPACE}" >> $GITHUB_ENV # Define the full build workspace path
+          mkdir -p "${BUILD_WORKSPACE}"
+          cd "${BUILD_WORKSPACE}"
       - name: Clone Required Repositories
         run: |
           repos=(
@@ -77,7 +69,6 @@ jobs:
           for repo in "${repos[@]}"; do
             git clone $repo || { echo "Failed to clone $repo"; exit 1; }
           done
-
       - name: Setup Kernel Source
         working-directory: ${{ env.BUILD_WORKSPACE }}
         run: |
@@ -86,7 +77,6 @@ jobs:
           repo init -u https://github.com/OnePlusOSS/kernel_manifest.git -b oneplus/sm8650 -m oneplus_13r.xml --depth=1 || { echo "Failed to initialize repo"; exit 1; }
           repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags || { echo "Failed to sync repo"; exit 1; }
           rm -rf ./kernel_platform/common/android/abi_gki_protected_exports_*
-
       - name: Setup KernelSU
         working-directory: ${{ env.BUILD_WORKSPACE }}/${{ env.KERNEL_PLATFORM_PATH }}
         run: |
@@ -96,7 +86,6 @@ jobs:
           KSU_VERSION=$(expr $(/usr/bin/git rev-list --count HEAD) "+" 10200)
           echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
           sed -i "s/DKSU_VERSION=11998/DKSU_VERSION=${KSU_VERSION}/" Makefile
-
       - name: Setup SUSFS
         working-directory: ${{ env.BUILD_WORKSPACE }}/${{ env.KERNEL_PLATFORM_PATH }}
         run: |
@@ -108,33 +97,28 @@ jobs:
           if [ ! -d "kernel_patches" ]; then
             git clone https://github.com/WildPlusKernel/kernel_patches.git --depth=1
           fi
-
           # Define patch and file paths for better readability
           SUSFS_PATCH_GKI="susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch"
           SUSFS_PATCH_KSU="kernel_patches/next/0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch"
           SYSCALL_HOOKS_PATCH="kernel_patches/next/syscall_hooks.patch"
           HIDE_STUFF_PATCH="kernel_patches/69_hide_stuff.patch"
-
           # Copy files
           cp "${SUSFS_PATCH_GKI}" ./common/
           cp "${SUSFS_PATCH_KSU}" ./KernelSU-Next/
           cp "${SYSCALL_HOOKS_PATCH}" ./common/
           cp susfs4ksu/kernel_patches/fs/* ./common/fs/
           cp susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
-
           # Apply patches
           cd ./KernelSU-Next
           patch -p1 < "${SUSFS_PATCH_KSU}" || true
           cd ../common
           patch -p1 < "${SUSFS_PATCH_GKI}" || true
-
           # Copy and apply hide_stuff patch
           if [ -f "${HIDE_STUFF_PATCH}" ]; then
             cp "${HIDE_STUFF_PATCH}" ./
             patch -p1 -F 3 < 69_hide_stuff.patch || true
           fi
           patch -p1 -F 3 < "${SYSCALL_HOOKS_PATCH}" || true
-
       - name: Configure Kernel
         working-directory: ${{ env.BUILD_WORKSPACE }}/${{ env.KERNEL_PLATFORM_PATH }}
         run: |
@@ -161,7 +145,6 @@ jobs:
             # Filesystem
             "CONFIG_TMPFS_XATTR=y"
             "CONFIG_TMPFS_POSIX_ACL=y"
-            "CONFIG_USB_OTG=y"
             # Network
             "CONFIG_IP_NF_TARGET_TTL=y"
             "CONFIG_IP6_NF_TARGET_HL=y"
@@ -176,16 +159,12 @@ jobs:
             "CONFIG_MSM_PERFORMANCE=y"
             # Power consumption - Enable zRAM for better memory management
             "CONFIG_NO_HZ_IDLE=y"
-            "CONFIG_PM_SLEEP_SMP=y"
-            "CONFIG_ZRAM=y"
-            "CONFIG_ZRAM_DEF_COMPRESSOR=\"lz4\"" # lz4 is a fast and widely compatible compressor for zRAM
-            "CONFIG_ZRAM_MEMORY_POOL_SIZE_PERCENT=20" # Allocate 20% of RAM for zRAM (adjust as needed)
+            "CONFIG_PM_SLEEP_SMP=y"            
           )
           for CONFIG in "${CONFIGS[@]}"; do
             echo "$CONFIG" >> ./common/arch/arm64/configs/gki_defconfig
           done
           sed -i '2s/check_defconfig//' ./common/build.config.gki
-
       - name: Run sed Commands
         working-directory: ${{ env.BUILD_WORKSPACE }}/${{ env.KERNEL_PLATFORM_PATH }}
         run: |
@@ -198,7 +177,6 @@ jobs:
           sed -i 's/-dirty//' ./msm-kernel/scripts/setlocalversion
           sed -i 's/-dirty//' ./external/dtc/scripts/setlocalversion
           sed -i 's/-dirty//' ./build/kernel/kleaf/workspace_status_stamp.py || echo "No workspace_status_stamp.py!"
-
       - name: Download Latest SUSFS Module from Release
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.SUSFS_CI == true }}
         working-directory: ${{ env.BUILD_WORKSPACE }}
@@ -220,7 +198,6 @@ jobs:
             echo "Error: Failed to download the SUSFS module."
             exit 1
           fi
-
       - name: Create ZIP Package
         working-directory: ${{ env.BUILD_WORKSPACE }}
         run: |
@@ -242,7 +219,6 @@ jobs:
           }
           ls -lh "../$ZIP_NAME"
           echo "zip_name=$ZIP_NAME" >> $GITHUB_ENV
-
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
