@@ -15,7 +15,6 @@ env:
   ROOT_DIR_PREFIX: "OP13r-A15"
   BRANCH: "android14-6.1"
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  SUSFS_URL: "https://github.com/sidex15/ksu_module_susfs/releases/latest/download/ksu_module_susfs_1.5.2+.zip"
   KERNEL_PLATFORM_PATH: "kernel_platform/oneplus13r_v/kernel_platform" # Define a constant for the kernel platform path
 jobs:
   build-release:
@@ -64,8 +63,8 @@ jobs:
         run: |
           repos=(
             "https://github.com/Kernel-SU/AnyKernel3 --depth=1"
-            "https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1 --depth=1" # Add depth for faster cloning
-            "https://github.com/WildPlusKernel/kernel_patches.git --depth=1" # Add depth for faster cloning
+            "https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1 --depth=1"
+            "https://github.com/WildPlusKernel/kernel_patches.git --depth=1"
           )
           for repo in "${repos[@]}"; do
             git clone $repo || { echo "Failed to clone $repo"; exit 1; }
@@ -178,27 +177,6 @@ jobs:
           sed -i 's/-dirty//' ./msm-kernel/scripts/setlocalversion
           sed -i 's/-dirty//' ./external/dtc/scripts/setlocalversion
           sed -i 's/-dirty//' ./build/kernel/kleaf/workspace_status_stamp.py || echo "No workspace_status_stamp.py!"
-      - name: Download Latest SUSFS Module from Release
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.SUSFS_CI == true }}
-        working-directory: ${{ env.BUILD_WORKSPACE }}
-        run: |
-          echo "Current working directory: $(pwd)"
-          echo "Downloading the latest SUSFS module from $SUSFS_URL..."
-          wget "$SUSFS_URL" -O ksu_module_susfs.zip # Specify output filename and remove -q for more output
-          DOWNLOAD_EXIT_CODE=$?
-          echo "wget exit code: $DOWNLOAD_EXIT_CODE"
-          if [ $DOWNLOAD_EXIT_CODE -eq 0 ]; then
-            echo "Download successful."
-            ls -l . # List files in the current directory
-            ls -l AnyKernel3/ # List files in AnyKernel3 directory
-            mkdir -p AnyKernel3/
-            cp ksu_module_susfs.zip AnyKernel3/ # Use the explicit filename
-            echo "Module copied to AnyKernel3/"
-            ls -l AnyKernel3/ # List files in AnyKernel3 after copy
-          else
-            echo "Error: Failed to download the SUSFS module."
-            exit 1
-          fi
       - name: Create ZIP Package
         working-directory: ${{ env.BUILD_WORKSPACE }}
         run: |
@@ -212,7 +190,7 @@ jobs:
             exit 1
           }
           cd AnyKernel3
-          ZIP_NAME="OP13r-KSU-${{ env.KSUVER }}${{ (github.event_name == 'workflow_dispatch' && inputs.SUSFS_CI == true) && '-SUSFS' || '' }}.zip"
+          ZIP_NAME="OP13r-KSU-${{ env.KSUVER }}.zip"
           echo "📦 Creating zip file: $ZIP_NAME"
           zip -r "../$ZIP_NAME" ./* || {
             echo "❌ Failed to create zip file"
