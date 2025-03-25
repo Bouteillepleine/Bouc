@@ -203,9 +203,12 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.SUSFS_CI == true }}
         working-directory: ${{ env.BUILD_WORKSPACE }}
         run: |
+          echo "Current working directory: $(pwd)"
           echo "Downloading the latest SUSFS module from $SUSFS_URL..."
-          if wget -q "$SUSFS_URL"; then
+          wget -q "$SUSFS_URL"
+          if [ $? -eq 0 ]; then
             echo "Download successful."
+            mkdir -p AnyKernel3/ # Ensure the directory exists
             cp ksu_module_susfs_1.5.2+.zip AnyKernel3/
             echo "Module copied to AnyKernel3/"
           else
