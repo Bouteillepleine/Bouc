@@ -53,13 +53,13 @@ jobs:
           git config --global user.email "actions@github.com"
       - name: Configure Build Directory
         run: |
-         set -euxo pipefail
-         ROOT_DIR="${ROOT_DIR_PREFIX}-$(date +'%Y-%m-%d-%H-%M')-release" # Use HH for 24-hour format for better sorting
-         echo "ROOT_DIR=${ROOT_DIR}" >> $GITHUB_ENV
-         echo "BUILD_WORKSPACE=$(pwd)/builds/${ROOT_DIR}" >> $GITHUB_ENV # Define the full build workspace path
-         mkdir -p "${ROOT_DIR_PREFIX}-builds"
-         mkdir -p "${{ env.BUILD_WORKSPACE }}"
-         cd "${{ env.BUILD_WORKSPACE }}"
+          set -euxo pipefail
+          ROOT_DIR="${ROOT_DIR_PREFIX}-$(date +'%Y-%m-%d-%H-%M')-release" # Use HH for 24-hour format for better sorting
+          echo "ROOT_DIR=${ROOT_DIR}" >> $GITHUB_ENV
+          BUILD_WORKSPACE=$(pwd)/builds/${ROOT_DIR}
+          echo "BUILD_WORKSPACE=${BUILD_WORKSPACE}" >> $GITHUB_ENV # Define the full build workspace path
+          mkdir -p "${BUILD_WORKSPACE}"
+          cd "${BUILD_WORKSPACE}"
       - name: Clone Required Repositories
         run: |
           repos=(
@@ -160,7 +160,7 @@ jobs:
             "CONFIG_MSM_PERFORMANCE=y"
             # Power consumption - Enable zRAM for better memory management
             "CONFIG_NO_HZ_IDLE=y"
-            "CONFIG_PM_SLEEP_SMP=y"            
+            "CONFIG_PM_SLEEP_SMP=y"
           )
           for CONFIG in "${CONFIGS[@]}"; do
             echo "$CONFIG" >> ./common/arch/arm64/configs/gki_defconfig
