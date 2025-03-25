@@ -205,12 +205,17 @@ jobs:
         run: |
           echo "Current working directory: $(pwd)"
           echo "Downloading the latest SUSFS module from $SUSFS_URL..."
-          wget -q "$SUSFS_URL"
-          if [ $? -eq 0 ]; then
+          wget "$SUSFS_URL" -O ksu_module_susfs.zip # Specify output filename and remove -q for more output
+          DOWNLOAD_EXIT_CODE=$?
+          echo "wget exit code: $DOWNLOAD_EXIT_CODE"
+          if [ $DOWNLOAD_EXIT_CODE -eq 0 ]; then
             echo "Download successful."
-            mkdir -p AnyKernel3/ # Ensure the directory exists
-            cp ksu_module_susfs_1.5.2+.zip AnyKernel3/
+            ls -l . # List files in the current directory
+            ls -l AnyKernel3/ # List files in AnyKernel3 directory
+            mkdir -p AnyKernel3/
+            cp ksu_module_susfs.zip AnyKernel3/ # Use the explicit filename
             echo "Module copied to AnyKernel3/"
+            ls -l AnyKernel3/ # List files in AnyKernel3 after copy
           else
             echo "Error: Failed to download the SUSFS module."
             exit 1
