@@ -1,4 +1,4 @@
-name: OP13r-KSU Kernel Build (Bazel Focus)
+name: OP13r-KSU Kernel Build (Bazel Focus v2)
 
 on:
   push:
@@ -9,7 +9,6 @@ on:
 env:
   DEBIAN_FRONTEND: noninteractive
   ROOT_DIR_PREFIX: "OP13r-A15"        # Prefix for the build directory
-  # BRANCH: "android14-6.1"         # Defined for context, used in SUSFS clone
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # GitHub Token for API interactions if needed
 
 jobs:
@@ -31,13 +30,16 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/TheMuppets/proprietary_vendor_muppets/master/meta/ci/util_free_space.sh | bash -s 50 # Keep 50GB free
           echo "Disk space cleanup finished."
 
-      - name: Setup Build Environment
+      - name: Setup Build Environment Packages
         run: |
+          echo "Setting up build environment packages..."
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            bc bison build-essential ccache cmake cpio curl flex \
-            git libdw-dev libelf-dev libssl-dev lld llvm ninja-build \
-            python3-dev python3-pip rsync zlib1g-dev
+            python3-pip curl git zip unzip gcc g++ make ninja-build file \
+            bc bison flex libssl-dev libelf-dev wget build-essential \
+            python3-dev python3-setuptools rsync ccache cmake libdw-dev zlib1g-dev \
+            libncurses5-dev # Added ncurses, often needed for kernel builds
+          echo "Build environment packages setup complete."
 
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -68,13 +70,14 @@ jobs:
           echo "Build directory: ${ROOT_DIR}"
           mkdir -p "builds/${ROOT_DIR}" # Create the main build directory
 
-      - name: Clone Required Repositories (AnyKernel3, Patches)
+      - name: Clone Tooling & Patch Repositories
+        # Clone AnyKernel3 and patch sources *before* kernel source sync
         working-directory: builds/${{ env.ROOT_DIR }}
         run: |
-          # Clone repositories needed before kernel source sync
+          echo "Cloning AnyKernel3 and patch source repositories..."
           repos=(
             "https://github.com/Kernel-SU/AnyKernel3 --depth=1 AnyKernel3"
-            # Clone patch sources here for use in SUSFS setup later
+            # Clone patch sources into separate dirs for clarity
             "https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1 --depth=1 susfs4ksu_patches"
             "https://github.com/WildPlusKernel/kernel_patches.git --depth=1 wild_kernel_patches"
           )
@@ -83,7 +86,7 @@ jobs:
             echo "Cloning ${url} into ${name}..."
             git clone $url $args $name || { echo "❌ Failed to clone ${url}"; exit 1; }
           done
-          echo "Base repositories cloned successfully."
+          echo "Tooling and patch repositories cloned successfully."
 
       - name: Setup Kernel Source (OnePlus 13R)
         working-directory: builds/${{ env.ROOT_DIR }}
@@ -116,21 +119,27 @@ jobs:
           KSU_VERSION=$(expr $(git rev-list --count HEAD) + 10200) # Use git from PATH
           echo "Determined KSU Version: ${KSU_VERSION}"
           echo "KSUVER=${KSU_VERSION}" >> $GITHUB_ENV # Export KSU version
-          # Update version in KSU Makefile (adjust sed if format changes)
+          # Update version in KSU Makefile (more robust sed)
           sed -i "s/.*DKSU_VERSION=.*/\t\t\tDKSU_VERSION=${KSU_VERSION} \\\\/" Makefile || \
             { echo "❌ Failed to set KSU version in Makefile"; exit 1; }
           echo "KernelSU setup complete. KSU version set to ${KSU_VERSION}."
 
-      - name: Integrate SUSFS
+      - name: Integrate SUSFS (Apply Patches)
         # Run from the root of the build directory to access the pre-cloned patch repos
         working-directory: builds/${{ env.ROOT_DIR }}
         run: |
-          echo "Setting up SUSFS..."
+          echo "Applying SUSFS patches..."
           set -euxo pipefail # Exit on error, print commands
 
           KERNEL_PLATFORM_DIR="kernel_platform/oneplus13r_v/kernel_platform"
-          SUSFS_PATCH_DIR="susfs4ksu_patches"
-          WILD_PATCH_DIR="wild_kernel_patches"
+          SUSFS_PATCH_DIR="susfs4ksu_patches" # Cloned earlier
+          WILD_PATCH_DIR="wild_kernel_patches"  # Cloned earlier
+
+          # Check if patch directories exist
+          if [ ! -d "$SUSFS_PATCH_DIR" ] || [ ! -d "$WILD_PATCH_DIR" ]; then
+              echo "❌ Patch source directories not found!"
+              exit 1
+          fi
 
           # Copy patch files from pre-cloned repos to kernel source locations
           echo "Copying patch files..."
@@ -149,22 +158,23 @@ jobs:
           cd "${KERNEL_PLATFORM_DIR}" # Change to kernel platform directory for patching
 
           cd ./KernelSU-Next
-          patch -p1 < 0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch || echo "⚠️ Patch 'KSU-Next SUSFS integration' already applied or failed, continuing..."
+          patch -N -p1 < 0001-kernel-patch-susfs-v1.5.5-to-KernelSU-Next-v1.0.5.patch || echo "ℹ️ Patch 'KSU-Next SUSFS integration' applied previously or failed."
           cd ../common
-          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch || echo "⚠️ Patch 'SUSFS core GKI 6.1' already applied or failed, continuing..."
-          # Optional hide_stuff patch
-          if [ -f "../../${WILD_PATCH_DIR}/69_hide_stuff.patch" ]; then # Check relative path from common/
+          patch -N -p1 < 50_add_susfs_in_gki-android14-6.1.patch || echo "ℹ️ Patch 'SUSFS core GKI 6.1' applied previously or failed."
+          # Optional hide_stuff patch (relative path from common/)
+          HIDE_STUFF_PATCH_PATH="../../${WILD_PATCH_DIR}/69_hide_stuff.patch"
+          if [ -f "$HIDE_STUFF_PATCH_PATH" ]; then
             echo "Applying optional hide_stuff patch..."
-            cp "../../${WILD_PATCH_DIR}/69_hide_stuff.patch" ./
-            patch -p1 -F 3 < 69_hide_stuff.patch || echo "⚠️ Optional patch 'hide_stuff' already applied or failed, continuing..."
+            cp "$HIDE_STUFF_PATCH_PATH" ./
+            patch -N -p1 -F 3 < 69_hide_stuff.patch || echo "ℹ️ Optional patch 'hide_stuff' applied previously or failed."
           else
-            echo "ℹ️ Optional patch 69_hide_stuff.patch not found, skipping."
+            echo "ℹ️ Optional patch 69_hide_stuff.patch not found at $HIDE_STUFF_PATCH_PATH, skipping."
           fi
-          patch -p1 -F 3 < syscall_hooks.patch || echo "⚠️ Patch 'syscall_hooks' already applied or failed, continuing..."
+          patch -N -p1 -F 3 < syscall_hooks.patch || echo "ℹ️ Patch 'syscall_hooks' applied previously or failed."
 
-          echo "SUSFS setup and patching complete."
+          echo "SUSFS patching complete."
           set +euxo pipefail # Turn off strict mode
-          # Note: Patch repos (susfs4ksu_patches, wild_kernel_patches) are left in build dir, could be removed if desired.
+          # Note: Patch repos remain in build dir, can be cleaned later if needed.
 
       - name: Configure Kernel Options
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
@@ -212,32 +222,27 @@ jobs:
             "CONFIG_DYNAMIC_DEBUG=n"
             "CONFIG_DEBUG_INFO=n"
           )
-          echo "Appending configurations to $CONFIG_FILE..."
+          echo "Applying configurations to $CONFIG_FILE..."
+          touch "$CONFIG_FILE" # Ensure file exists
           for CONFIG in "${CONFIGS[@]}"; do
-            # Avoid adding duplicates - check if the exact line already exists
-            if ! grep -Fxq "$CONFIG" "$CONFIG_FILE"; then
-                 # Check if config key exists, modify if it does, otherwise append
-                 CONFIG_KEY=$(echo "$CONFIG" | cut -d'=' -f1)
-                 if grep -q "^${CONFIG_KEY}=" "$CONFIG_FILE"; then
-                     sed -i "s|^${CONFIG_KEY}=.*|${CONFIG}|" "$CONFIG_FILE"
-                     echo "Modified: ${CONFIG}"
-                 elif grep -q "^# ${CONFIG_KEY} is not set" "$CONFIG_FILE"; then
-                     sed -i "s|^# ${CONFIG_KEY} is not set.*|${CONFIG}|" "$CONFIG_FILE"
-                     echo "Uncommented/Set: ${CONFIG}"
-                 else
-                     echo "$CONFIG" >> "$CONFIG_FILE"
-                     echo "Appended: ${CONFIG}"
-                 fi
+            CONFIG_KEY=$(echo "$CONFIG" | cut -d'=' -f1)
+            # Remove existing line(s) for this key (commented or uncommented)
+            sed -i "/^${CONFIG_KEY}=/d" "$CONFIG_FILE"
+            sed -i "/^# ${CONFIG_KEY} is not set/d" "$CONFIG_FILE"
+
+            # Add the desired line
+            if [[ "$CONFIG" == *=n ]]; then
+                echo "# ${CONFIG_KEY} is not set" >> "$CONFIG_FILE"
+                echo "Set: # ${CONFIG_KEY} is not set"
             else
-                echo "Skipped (already exists): ${CONFIG}"
+                echo "$CONFIG" >> "$CONFIG_FILE"
+                echo "Set: ${CONFIG}"
             fi
-            # Ensure 'n' values result in commented out line
-             if [[ "$CONFIG" == *=n ]]; then
-                CONFIG_KEY=$(echo "$CONFIG" | cut -d'=' -f1)
-                sed -i "s|^${CONFIG_KEY}=n|# ${CONFIG_KEY} is not set|" "$CONFIG_FILE"
-             fi
           done
-          # This sed command was in your original, likely needed for GKI builds
+          # Ensure the file is sorted and unique (optional but good practice)
+          sort -u "$CONFIG_FILE" -o "$CONFIG_FILE"
+
+          # Apply GKI build config modification
           sed -i 's/check_defconfig//' ./common/build.config.gki || echo "ℹ️ 'check_defconfig' not found in common/build.config.gki"
           set +e
           echo "Kernel configuration applied."
@@ -248,9 +253,17 @@ jobs:
           echo "Running final sed modifications..."
           # Remove '-dirty' suffix from version strings
           echo "Removing '-dirty' suffix from versioning scripts..."
-          find . \( -path ./common/scripts -o -path ./msm-kernel/scripts -o -path ./external/dtc/scripts \) -type f -name 'setlocalversion' -exec sed -i 's/-dirty//' {} + || echo "⚠️ Could not modify some setlocalversion scripts"
-          find . -path ./build/kernel/kleaf -type f -name 'workspace_status_stamp.py' -exec sed -i "s/'git_dirty': '1'/'git_dirty': '0'/" {} + || echo "ℹ️ workspace_status_stamp.py not found or modification failed."
+          # Use find more broadly within kernel_platform
+          find . -path '*/scripts/setlocalversion' -exec sed -i 's/-dirty//' {} + || echo "⚠️ Could not modify some setlocalversion scripts"
+          find . -path '*/build/kernel/kleaf/workspace_status_stamp.py' -exec sed -i "s/'git_dirty': '1'/'git_dirty': '0'/" {} + || echo "ℹ️ workspace_status_stamp.py not found or modification failed."
           echo "Final source modifications complete."
+
+      - name: Download build_with_bazel.py
+        working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v
+        run: |
+          echo "Downloading build_with_bazel.py..."
+          curl -o build_with_bazel.py https://example.com/path/to/build_with_bazel.py
+          chmod +x build_with_bazel.py
 
       - name: Build Kernel using Bazel script
         # This step focuses *only* on running the OnePlus build script.
@@ -278,24 +291,29 @@ jobs:
             --config=stamp \
             --user_kmi_symbol_lists=//msm-kernel:android/abi_gki_aarch64_qcom \
             --ignore_missing_projects \
-            --lto=thin `# Use 'thin' or 'full' LTO, or remove if causing issues` \
+            --lto=thin `# Use 'thin' (recommended) or 'full' LTO, or remove if causing issues` \
             -o "${BAZEL_OUTPUT_DIR}" || { echo "❌ Bazel build failed"; exit 1; }
 
           echo "✅ Bazel kernel build completed successfully."
           echo "Final ccache stats:"
           ccache -s
 
-          # Verify expected outputs exist (Image and module staging)
+          # --- Verification ---
           echo "Verifying build outputs..."
           if [ ! -f "${BAZEL_OUTPUT_DIR}/dist/Image" ]; then
               echo "❌ Error: Kernel Image (${BAZEL_OUTPUT_DIR}/dist/Image) not found after Bazel build!"
+              echo "Listing ${BAZEL_OUTPUT_DIR}/dist/ :"
+              ls -l "${BAZEL_OUTPUT_DIR}/dist/"
               exit 1
+          else
+              echo "✅ Kernel Image found."
           fi
-          if [ ! -d "${BAZEL_OUTPUT_DIR}/staging/lib/modules" ]; then
-              echo "⚠️ Warning: Module staging directory (${BAZEL_OUTPUT_DIR}/staging/lib/modules) not found. ZIP may lack modules."
+          if [ ! -d "${BAZEL_OUTPUT_DIR}/staging/lib/modules" ] || [ -z "$(ls -A ${BAZEL_OUTPUT_DIR}/staging/lib/modules)" ]; then
+              echo "⚠️ Warning: Module staging directory (${BAZEL_OUTPUT_DIR}/staging/lib/modules) not found or empty. ZIP may lack modules."
+          else
+              echo "✅ Module staging directory found."
           fi
-          echo "Build output verification passed."
-
+          echo "Build output verification complete."
 
       - name: Create Flashable ZIP Package (AnyKernel3)
         working-directory: builds/${{ env.ROOT_DIR }} # Run from the root build directory
@@ -305,60 +323,4 @@ jobs:
           # Paths relative to the current working directory (builds/${{ env.ROOT_DIR }})
           BAZEL_OUTPUT_DIR="kernel_platform/oneplus13r_v/out"
           KERNEL_IMAGE_PATH="${BAZEL_OUTPUT_DIR}/dist/Image"
-          MODULE_STAGING_PATH="${BAZEL_OUTPUT_DIR}/staging"
-
-          # 1. Verify and Copy Kernel Image
-          if [ ! -f "$KERNEL_IMAGE_PATH" ]; then
-            echo "❌ Kernel image not found at $KERNEL_IMAGE_PATH"
-            ls -l "$(dirname "$KERNEL_IMAGE_PATH")" # Debugging
-            exit 1
-          fi
-          echo "Copying kernel image to $AK3_DIR..."
-          cp "$KERNEL_IMAGE_PATH" "$AK3_DIR/Image" || \
-            { echo "❌ Failed to copy kernel image to $AK3_DIR"; exit 1; }
-
-          # 2. Find and Copy Modules
-          # Find the kernel version specific module directory under staging
-          MODULE_SRC_ROOT=$(find "$MODULE_STAGING_PATH/lib/modules/" -maxdepth 1 -mindepth 1 -type d -print -quit)
-          if [ -d "$MODULE_SRC_ROOT/kernel" ]; then
-              MODULE_TARGET_DIR="$AK3_DIR/modules/vendor/lib/modules" # Standard path in AK3
-              echo "Copying kernel modules from $MODULE_SRC_ROOT/kernel to $MODULE_TARGET_DIR..."
-              mkdir -p "$MODULE_TARGET_DIR"
-              # Copy all .ko files, preserving structure relative to 'kernel'
-              find "$MODULE_SRC_ROOT/kernel" -name '*.ko' -exec cp --parents -t "$MODULE_TARGET_DIR" {} + || \
-                { echo "⚠️ Failed to copy some kernel modules."; } # Warn only
-
-              # Copy module metadata files (important for loading)
-              echo "Copying module metadata files..."
-              cp "$MODULE_SRC_ROOT/modules.alias" "$MODULE_TARGET_DIR/" 2>/dev/null || true
-              cp "$MODULE_SRC_ROOT/modules.dep" "$MODULE_TARGET_DIR/" 2>/dev/null || true
-              cp "$MODULE_SRC_ROOT/modules.softdep" "$MODULE_TARGET_DIR/" 2>/dev/null || true
-              cp "$MODULE_SRC_ROOT/modules.builtin" "$MODULE_TARGET_DIR/" 2>/dev/null || true # Might not be needed
-              # Ensure modules.load exists, even if empty, for init scripts
-              touch "$MODULE_TARGET_DIR/modules.load"
-              echo "Module copy complete."
-          else
-              echo "⚠️ Kernel modules staging path ($MODULE_STAGING_PATH/lib/modules/*/kernel) not found or empty. ZIP will not contain modules."
-          fi
-
-          # 3. Create ZIP File
-          cd "$AK3_DIR" # Go into AnyKernel3 directory
-          ZIP_NAME="OP13r-KSU-${{ env.KSUVER }}-${{ github.run_number }}.zip" # Unique name
-          echo "📦 Creating zip file: ../$ZIP_NAME"
-          # Zip contents of current directory (-r for recursive, -9 for best compression, -x to exclude)
-          zip -r9 "../$ZIP_NAME" . -x ".git*" || \
-            { echo "❌ Failed to create zip file"; exit 1; }
-          cd .. # Return to build root directory
-
-          # 4. Final Check and Export Name
-          echo "✅ ZIP package created successfully:"
-          ls -lh "$ZIP_NAME"
-          echo "zip_name=$ZIP_NAME" >> $GITHUB_ENV
-
-      - name: Upload Build Artifact (Flashable ZIP)
-        uses: actions/upload-artifact@v4
-        with:
-          name: OP13r-KSU-${{ env.KSUVER }} # Artifact name
-          path: builds/${{ env.ROOT_DIR }}/${{ env.zip_name }} # Path to the zip file
-          if-no-files-found: error # Fail if zip isn't found
-          retention-days: 7 # Optional: Keep artifact for 7 days
+         
