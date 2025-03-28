@@ -153,11 +153,7 @@ jobs:
       - name: Run sed Commands
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
-          echo "Running sed commands..."
-          sed -i 's/CONFIG_LTO=n/CONFIG_LTO=y/' "./common/arch/arm64/configs/gki_defconfig"
-          sed -i 's/CONFIG_LTO_CLANG_THIN=y/CONFIG_LTO_CLANG_FULL=y/' "./common/arch/arm64/configs/gki_defconfig"
-          sed -i 's/CONFIG_LTO_CLANG_NONE=y/CONFIG_LTO_CLANG_FULL=y/' "./common/arch/arm64/configs/gki_defconfig"
-          sed -i 's/check_defconfig//' ./common/build.config.gki
+          echo "Running sed commands..."          
           sed -i 's/-dirty//' ./common/scripts/setlocalversion
           sed -i 's/-dirty//' ./msm-kernel/scripts/setlocalversion
           sed -i 's/-dirty//' ./external/dtc/scripts/setlocalversion
@@ -166,12 +162,12 @@ jobs:
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/
         run: |
           cd kernel_platform
-          export LTO=full
           mkdir out
           export PATH="/usr/lib/ccache:$PATH"
           ./build_with_bazel.py \
             -t pineapple \
             gki \
+            --lto=full \
             --jobs=$(nproc --all) \
             --verbose_failures \
             --config=stamp \
