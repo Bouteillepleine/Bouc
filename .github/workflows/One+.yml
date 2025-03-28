@@ -1,37 +1,38 @@
-name: OP13r-KSU Kernel Build (Bazel Focus - Enhanced Verification)
+name: OP13r-KSU Kernel Build (Bazel Focus - Debug Missing Script)
 
 on:
   push:
     branches:
-      - main # Triggers on push to the main branch
-  workflow_dispatch: # Allows manual triggering
+      - main
+  workflow_dispatch:
 
 env:
   DEBIAN_FRONTEND: noninteractive
-  ROOT_DIR_PREFIX: "OP13r-A15"        # Prefix for the build directory
-  # BRANCH: "android14-6.1"         # Defined for context, used in SUSFS clone
-  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # GitHub Token for API interactions if needed
+  ROOT_DIR_PREFIX: "OP13r-A15"
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   build-release:
-    runs-on: ubuntu-latest # Use the latest Ubuntu runner
-    timeout-minutes: 180   # Increased timeout for potentially long Bazel build
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
     steps:
       - name: Checkout Workflow Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1 # Fetch only the latest commit of the workflow repo itself
+          fetch-depth: 1
 
       - name: Free Disk Space
+        # ... (no changes) ...
         run: |
           echo "Starting disk space cleanup..."
           sudo apt-get update -qq
           sudo apt-get install -qq curl wget # Ensure wget is installed too
-          # Use a common script to free up space
           curl -fsSL https://raw.githubusercontent.com/TheMuppets/proprietary_vendor_muppets/master/meta/ci/util_free_space.sh | bash -s 50 # Keep 50GB free
           echo "Disk space cleanup finished."
 
+
       - name: Setup Build Environment Packages
+        # ... (no changes) ...
         run: |
           echo "Setting up build environment packages..."
           sudo apt-get update
@@ -42,7 +43,9 @@ jobs:
             libncurses5-dev git-lfs # Added ncurses and git-lfs
           echo "Build environment packages setup complete."
 
-      - name: Setup ccache # Kept for C/C++ object file caching
+
+      - name: Setup ccache
+        # ... (no changes) ...
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: ${{ github.workflow }}-${{ github.ref }}-${{ github.run_id }} # Specific key per run
@@ -51,6 +54,7 @@ jobs:
           max-size: 2G # Set maximum ccache size
 
       - name: Setup Python, Repo Tool, and Git LFS
+        # ... (no changes) ...
         run: |
           echo "Initializing git-lfs..."
           git lfs install --system # Initialize LFS for the system user
@@ -67,14 +71,18 @@ jobs:
           git config --global user.email "actions@github.com"
           echo "Python, repo tool, and Git LFS setup complete."
 
+
       - name: Configure Build Directory
+        # ... (no changes) ...
         run: |
           ROOT_DIR="${ROOT_DIR_PREFIX}-$(date +'%Y%m%d-%H%M')-release" # YYYYMMDD format
           echo "ROOT_DIR=${ROOT_DIR}" >> $GITHUB_ENV # Export ROOT_DIR
           echo "Build directory: ${ROOT_DIR}"
           mkdir -p "builds/${ROOT_DIR}" # Create the main build directory
 
+
       - name: Clone Tooling & Patch Repositories
+        # ... (no changes) ...
         working-directory: builds/${{ env.ROOT_DIR }}
         run: |
           echo "Cloning AnyKernel3 and patch source repositories..."
@@ -90,7 +98,9 @@ jobs:
           done
           echo "Tooling and patch repositories cloned successfully."
 
-      - name: Setup Kernel Source (OnePlus 13R) and Verify Build Script # ENHANCED VERIFICATION
+
+      - name: Setup Kernel Source (OnePlus 13R) and Verify Build Script
+        # ... (Verification logic remains the same) ...
         working-directory: builds/${{ env.ROOT_DIR }}
         run: |
           echo "Setting up kernel source..."
@@ -107,7 +117,6 @@ jobs:
           echo "Repo initialized successfully."
 
           echo "Syncing repo (this may take a while)..."
-          # Try adding --verbose, though its effect varies
           repo sync -c -f -j$(nproc --all) --force-sync --no-clone-bundle --no-tags --verbose
           SYNC_EXIT_CODE=$?
 
@@ -118,14 +127,11 @@ jobs:
             echo "❌ Verification Failed: Build script ${BUILD_SCRIPT_PATH} does NOT exist."
             echo "Listing current directory contents:"
             ls -la
-            # Exit only if sync also failed, otherwise let later checks handle it
-            if [ $SYNC_EXIT_CODE -ne 0 ]; then exit 1; fi
+            if [ $SYNC_EXIT_CODE -ne 0 ]; then exit 1; fi # Exit if sync also failed
           else
             echo "File ${BUILD_SCRIPT_PATH} exists. Checking content..."
-            # Use 'file' command for type detection
             FILE_TYPE=$(file "${BUILD_SCRIPT_PATH}")
             echo "File Type: ${FILE_TYPE}"
-            # Check first few lines for HTML tags
             if head -n 5 "${BUILD_SCRIPT_PATH}" | grep -qiE '<!doctype html>|<html>|<head>|<body>'; then
               IS_HTML=true
               echo "❌ Verification Failed: Build script ${BUILD_SCRIPT_PATH} appears to be an HTML file!"
@@ -135,7 +141,6 @@ jobs:
             else
               IS_HTML=false
               echo "File does not immediately look like HTML."
-              # Check for Python shebang
               if head -n 1 "${BUILD_SCRIPT_PATH}" | grep -qE '^#!/.*python'; then
                 echo "✅ Verification Passed: Python shebang found."
               else
@@ -143,27 +148,22 @@ jobs:
                 echo "First line: $(head -n 1 ${BUILD_SCRIPT_PATH})"
               fi
             fi
-            # If it looks like HTML, force an error exit
-            if [ "$IS_HTML" = true ]; then
-                exit 1
-            fi
+            if [ "$IS_HTML" = true ]; then exit 1; fi # Force exit if HTML
           fi
           echo "--- End Verification ---"
 
-          # Now check the sync exit code definitively
           if [ $SYNC_EXIT_CODE -ne 0 ]; then
             echo "❌ Failed to sync repo (Exit Code: $SYNC_EXIT_CODE)"
             exit 1
           fi
           echo "Repo sync completed successfully."
 
-
-          # Optional: Remove potentially problematic ABI files
           echo "Removing ABI GKI protected exports..."
           rm -rf ./kernel_platform/common/android/abi_gki_protected_exports_*
           echo "Kernel source setup complete."
 
       - name: Integrate KernelSU
+        # ... (no changes) ...
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
           echo "Setting up KernelSU..."
@@ -178,7 +178,14 @@ jobs:
             { echo "❌ Failed to set KSU version in Makefile"; exit 1; }
           echo "KernelSU setup complete. KSU version set to ${KSU_VERSION}."
 
+      - name: List Directory Before SUSFS
+        working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v
+        run: |
+          echo "--- Listing contents of $(pwd) BEFORE SUSFS step ---"
+          ls -la
+
       - name: Integrate SUSFS (Apply Patches)
+        # ... (SUSFS step logic remains the same) ...
         working-directory: builds/${{ env.ROOT_DIR }}
         run: |
           echo "Applying SUSFS patches..."
@@ -220,7 +227,14 @@ jobs:
           echo "SUSFS patching complete."
           set +euxo pipefail
 
+      - name: List Directory After SUSFS
+        working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v
+        run: |
+          echo "--- Listing contents of $(pwd) AFTER SUSFS step ---"
+          ls -la
+
       - name: Apply KernelSU Compatibility Fixes for Kprobes=n
+        # ... (no changes) ...
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform/common/drivers/kernelsu
         run: |
           echo "Applying compatibility fixes to sucompat.c..."
@@ -250,7 +264,9 @@ jobs:
 
           echo "✅ Fixes applied to $TARGET_FILE."
 
+
       - name: Configure Kernel Options
+        # ... (no changes) ...
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
           echo "Applying kernel configurations..."
@@ -309,7 +325,9 @@ jobs:
           set +e
           echo "Kernel configuration applied."
 
+
       - name: Apply Final Source Modifications (sed)
+        # ... (no changes) ...
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v/kernel_platform
         run: |
           echo "Running final sed modifications..."
@@ -317,6 +335,7 @@ jobs:
           find . -path '*/scripts/setlocalversion' -exec sed -i 's/-dirty//' {} + || echo "⚠️ Could not modify some setlocalversion scripts"
           find . -path '*/build/kernel/kleaf/workspace_status_stamp.py' -exec sed -i "s/'git_dirty': '1'/'git_dirty': '0'/" {} + || echo "ℹ️ workspace_status_stamp.py not found or modification failed."
           echo "Final source modifications complete."
+
 
       - name: Build Kernel using Bazel script (Isolated Output Base)
         working-directory: builds/${{ env.ROOT_DIR }}/kernel_platform/oneplus13r_v
@@ -327,17 +346,18 @@ jobs:
           ccache -s
 
           export BAZEL_FINAL_ARTIFACT_DIR="$(pwd)/out"
-          export BAZEL_INTERNAL_OUTPUT_BASE="${BAZEL_FINAL_ARTIFACT_DIR}/bazel_output_base" # Subdir for Bazel's state
+          export BAZEL_INTERNAL_OUTPUT_BASE="${BAZEL_FINAL_ARTIFACT_DIR}/bazel_output_base"
           mkdir -p "${BAZEL_FINAL_ARTIFACT_DIR}" "${BAZEL_INTERNAL_OUTPUT_BASE}"
           echo "Bazel Final Artifact Directory: ${BAZEL_FINAL_ARTIFACT_DIR}"
           echo "Bazel Internal Output Base: ${BAZEL_INTERNAL_OUTPUT_BASE}"
 
-          # --- Pre-execution Verification (Safety Net) ---
+          # --- Pre-execution Verification (Safety Net + Listing) ---
           BUILD_SCRIPT_PATH="./build_with_bazel.py"
           echo "Verifying ${BUILD_SCRIPT_PATH} content immediately before execution..."
+          echo "Listing $(pwd) contents:"
+          ls -la
           if [ ! -f "${BUILD_SCRIPT_PATH}" ]; then
             echo "❌ Error: Build script ${BUILD_SCRIPT_PATH} not found before execution!"
-            ls -la
             exit 1
           fi
           if head -n 1 "${BUILD_SCRIPT_PATH}" | grep -qiE '<!doctype html>|<html>'; then
@@ -357,9 +377,9 @@ jobs:
             --config=stamp \
             --user_kmi_symbol_lists=//msm-kernel:android/abi_gki_aarch64_qcom \
             --ignore_missing_projects \
-            --lto=full `# Apply full LTO for GKI` \
-            --output_base "${BAZEL_INTERNAL_OUTPUT_BASE}" `# Isolate Bazel internal state` \
-            -o "${BAZEL_FINAL_ARTIFACT_DIR}" `# Direct final artifacts` \
+            --lto=full \
+            --output_base "${BAZEL_INTERNAL_OUTPUT_BASE}" \
+            -o "${BAZEL_FINAL_ARTIFACT_DIR}" \
              || { echo "❌ Bazel build failed"; exit 1; }
 
           echo "✅ Bazel kernel build completed successfully."
@@ -368,7 +388,6 @@ jobs:
 
           # --- Verification ---
           echo "Verifying build outputs in ${BAZEL_FINAL_ARTIFACT_DIR}..."
-          # Check for final artifacts in the directory specified by -o
           if [ ! -f "${BAZEL_FINAL_ARTIFACT_DIR}/dist/Image" ]; then
               echo "❌ Error: Kernel Image (${BAZEL_FINAL_ARTIFACT_DIR}/dist/Image) not found after Bazel build!"
               echo "Listing ${BAZEL_FINAL_ARTIFACT_DIR}/dist/ :"
@@ -377,7 +396,6 @@ jobs:
           else
               echo "✅ Kernel Image found."
           fi
-          # Check for staging dir also within the final artifact dir structure
           if [ ! -d "${BAZEL_FINAL_ARTIFACT_DIR}/staging/lib/modules" ] || [ -z "$(ls -A ${BAZEL_FINAL_ARTIFACT_DIR}/staging/lib/modules)" ]; then
               echo "⚠️ Warning: Module staging directory (${BAZEL_FINAL_ARTIFACT_DIR}/staging/lib/modules) not found or empty. ZIP may lack modules."
           else
@@ -386,12 +404,11 @@ jobs:
           echo "Build output verification complete."
 
       - name: Create Flashable ZIP Package (AnyKernel3)
+        # ... (no changes) ...
         working-directory: builds/${{ env.ROOT_DIR }}
         run: |
           echo "Creating AnyKernel3 ZIP package..."
           AK3_DIR="AnyKernel3"
-          # Paths relative to the current working directory (builds/${{ env.ROOT_DIR }})
-          # Point to the FINAL artifact directory, not the internal base
           BAZEL_OUTPUT_DIR="kernel_platform/oneplus13r_v/out"
           KERNEL_IMAGE_PATH="${BAZEL_OUTPUT_DIR}/dist/Image"
           MODULE_STAGING_PATH="${BAZEL_OUTPUT_DIR}/staging"
@@ -438,7 +455,9 @@ jobs:
           ls -lh "$ZIP_NAME"
           echo "zip_name=$ZIP_NAME" >> $GITHUB_ENV
 
+
       - name: Upload Build Artifact (Flashable ZIP)
+        # ... (no changes) ...
         uses: actions/upload-artifact@v4
         with:
           name: OP13r-KSU-${{ env.KSUVER }} # Artifact name
