@@ -31,16 +31,13 @@ jobs:
           curl -fsSL https://raw.githubusercontent.com/TheMuppets/proprietary_vendor_muppets/master/meta/ci/util_free_space.sh | bash -s 50 # Keep 50GB free
           echo "Disk space cleanup finished."
 
-      - name: Setup Build Environment Packages
+      - name: Setup Build Environment
         run: |
-          echo "Setting up build environment packages..."
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            python3-pip curl git zip unzip gcc g++ make ninja-build file \
-            bc bison flex libssl-dev libelf-dev wget build-essential \
-            python3-dev python3-setuptools rsync ccache cmake libdw-dev zlib1g-dev \
-            libncurses5-dev # Added ncurses, often needed for kernel builds
-          echo "Build environment packages setup complete."
+            bc bison build-essential ccache cmake cpio curl flex \
+            git libdw-dev libelf-dev libssl-dev lld llvm ninja-build \
+            python3-dev python3-pip rsync zlib1g-dev
 
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
