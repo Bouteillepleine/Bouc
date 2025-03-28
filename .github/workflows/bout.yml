@@ -274,6 +274,9 @@ jobs:
           mkdir -p "${BAZEL_OUTPUT_DIR}"
           echo "Bazel output directory: ${BAZEL_OUTPUT_DIR}"
 
+          # Ensure the build_with_bazel.py script is present
+          # Create or place the script here if not already available
+
           # Execute the main build script provided by OnePlus source
           # Assumes build_with_bazel.py is in the working directory (oneplus13r_v)
           # Adjust -t target if 'pineapple' isn't correct for 13r
@@ -319,58 +322,4 @@ jobs:
           KERNEL_IMAGE_PATH="${BAZEL_OUTPUT_DIR}/dist/Image"
           MODULE_STAGING_PATH="${BAZEL_OUTPUT_DIR}/staging"
 
-          # 1. Verify and Copy Kernel Image
-          if [ ! -f "$KERNEL_IMAGE_PATH" ]; then
-            echo "❌ Kernel image not found at $KERNEL_IMAGE_PATH"
-            ls -l "$(dirname "$KERNEL_IMAGE_PATH")" # Debugging
-            exit 1
-          fi
-          echo "Copying kernel image to $AK3_DIR..."
-          cp "$KERNEL_IMAGE_PATH" "$AK3_DIR/Image" || \
-            { echo "❌ Failed to copy kernel image to $AK3_DIR"; exit 1; }
-
-          # 2. Find and Copy Modules
-          # Find the kernel version specific module directory under staging
-          MODULE_SRC_ROOT=$(find "$MODULE_STAGING_PATH/lib/modules/" -maxdepth 1 -mindepth 1 -type d -print -quit)
-          if [ -d "$MODULE_SRC_ROOT/kernel" ]; then
-              MODULE_TARGET_DIR="$AK3_DIR/modules/vendor/lib/modules" # Standard path in AK3
-              echo "Copying kernel modules from $MODULE_SRC_ROOT/kernel to $MODULE_TARGET_DIR..."
-              mkdir -p "$MODULE_TARGET_DIR"
-              # Copy all .ko files, preserving structure relative to 'kernel'
-              find "$MODULE_SRC_ROOT/kernel" -name '*.ko' -exec cp --parents -t "$MODULE_TARGET_DIR" {} + || \
-                { echo "⚠️ Failed to copy some kernel modules."; } # Warn only
-
-              # Copy module metadata files (important for loading)
-              echo "Copying module metadata files..."
-              cp "$MODULE_SRC_ROOT/modules.alias" "$MODULE_TARGET_DIR/" 2>/dev/null || true
-              cp "$MODULE_SRC_ROOT/modules.dep" "$MODULE_TARGET_DIR/" 2>/dev/null || true
-              cp "$MODULE_SRC_ROOT/modules.softdep" "$MODULE_TARGET_DIR/" 2>/dev/null || true
-              cp "$MODULE_SRC_ROOT/modules.builtin" "$MODULE_TARGET_DIR/" 2>/dev/null || true # Might not be needed
-              # Ensure modules.load exists, even if empty, for init scripts
-              touch "$MODULE_TARGET_DIR/modules.load"
-              echo "Module copy complete."
-          else
-              echo "⚠️ Kernel modules staging path ($MODULE_STAGING_PATH/lib/modules/*/kernel) not found or empty. ZIP will not contain modules."
-          fi
-
-          # 3. Create ZIP File
-          cd "$AK3_DIR" # Go into AnyKernel3 directory
-          ZIP_NAME="OP13r-KSU-${{ env.KSUVER }}-${{ github.run_number }}.zip" # Unique name
-          echo "📦 Creating zip file: ../$ZIP_NAME"
-          # Zip contents of current directory (-r for recursive, -9 for best compression, -x to exclude)
-          zip -r9 "../$ZIP_NAME" . -x ".git*" || \
-            { echo "❌ Failed to create zip file"; exit 1; }
-          cd .. # Return to build root directory
-
-          # 4. Final Check and Export Name
-          echo "✅ ZIP package created successfully:"
-          ls -lh "$ZIP_NAME"
-          echo "zip_name=$ZIP_NAME" >> $GITHUB_ENV
-
-      - name: Upload Build Artifact (Flashable ZIP)
-        uses: actions/upload-artifact@v4
-        with:
-          name: OP13r-KSU-${{ env.KSUVER }} # Artifact name
-          path: builds/${{ env.ROOT_DIR }}/${{ env.zip_name }} # Path to the zip file
-          if-no-files-found: error # Fail if zip isn't found
-          retention-days: 7 # Optional: Keep artifact for 7 days
+          # 1. Verify and
